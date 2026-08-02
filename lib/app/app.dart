@@ -10,7 +10,7 @@ class ChargeHubApp extends StatelessWidget {
     return MaterialApp(
       title: 'ChargeHub',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
+      theme: AppTheme.light,
       home: const HomePage(),
     );
   }

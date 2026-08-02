@@ -5,7 +5,7 @@ import 'colors.dart';
 class AppTheme {
   AppTheme._();
 
-  static ThemeData get lightTheme {
+  static ThemeData get light {
     return ThemeData(
       useMaterial3: true,
 
@@ -18,9 +18,9 @@ class AppTheme {
 
       appBarTheme: const AppBarTheme(
         centerTitle: true,
-        elevation: 0,
         backgroundColor: AppColors.background,
         foregroundColor: AppColors.textPrimary,
+        elevation: 0,
       ),
     );
   }
