@@ -1,4 +1,4 @@
-package com.salman.chargebub
+package com.salman.chargehub
 
 import io.flutter.embedding.android.FlutterActivity
 

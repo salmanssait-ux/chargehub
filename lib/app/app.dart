@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/theme/theme.dart';
-import '../features/home/presentation/pages/home_page.dart';
+import '../features/stations/presentation/pages/stations_page.dart';
 
 class ChargeHubApp extends StatelessWidget {
   const ChargeHubApp({super.key});
@@ -11,7 +11,7 @@ class ChargeHubApp extends StatelessWidget {
       title: 'ChargeHub',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
-      home: const HomePage(),
+      home: const StationsPage(),
     );
   }
 }

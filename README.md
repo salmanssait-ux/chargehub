@@ -1,17 +1,25 @@
-# chargehub
+# ChargeHub
 
-A new Flutter project.
+ChargeHub is a Flutter application that helps EV users discover nearby charging stations.
 
-## Getting Started
+## Features
+- GPS-based nearby station discovery
+- Open Charge Map integration
+- Clean Architecture
+- Riverpod state management
+- Repository pattern
 
-This project is a starting point for a Flutter application.
+## Planned Features
+- Google Maps integration
+- Search & filters
+- Multi-provider support
+- Real-time charger availability
+- Booking & navigation
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Tech Stack
+- Flutter
+- Dart
+- Riverpod
+- Geolocator
+- HTTP
+- Open Charge Map API
