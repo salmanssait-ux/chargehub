@@ -1,4 +1,4 @@
-# chargebub
+# chargehub
 
 A new Flutter project.
 
