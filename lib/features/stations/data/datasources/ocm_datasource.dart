@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/ocm_station_model.dart';
@@ -9,7 +10,7 @@ class OcmDataSource {
 
   final http.Client _client;
 
-  static const String _apiKey = 'ecd7a4b6-67ac-49f2-99ff-b5923dc90712';
+  String get _apiKey => dotenv.env['OCM_API_KEY'] ?? '';
 
   Future<List<OcmStationModel>> getNearbyStations({
     required double latitude,

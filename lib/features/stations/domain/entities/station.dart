@@ -1,4 +1,3 @@
-
 class Station {
   const Station({
     required this.id,
@@ -7,9 +6,10 @@ class Station {
     required this.latitude,
     required this.longitude,
     required this.distanceKm,
-    required this.isOperational,
+    required this.operationalStatus,
     required this.isPublic,
     required this.connectors,
+    required this.source,
   });
 
   final String id;
@@ -18,9 +18,21 @@ class Station {
   final double latitude;
   final double longitude;
   final double distanceKm;
-  final bool isOperational;
-  final bool isPublic;
+  final StationOperationalStatus operationalStatus;
+  final bool? isPublic;
   final List<Connector> connectors;
+  final StationSource source;
+}
+
+enum StationSource {
+  ocm,
+  osm,
+}
+
+enum StationOperationalStatus {
+  operational,
+  unavailable,
+  unknown,
 }
 
 class Connector {

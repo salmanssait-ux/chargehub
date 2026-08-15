@@ -32,11 +32,8 @@ class OcmStationModel {
       )
           : null,
       connections: (json['Connections'] as List<dynamic>?)
-          ?.map(
-            (e) => OcmConnection.fromJson(
-          e as Map<String, dynamic>,
-        ),
-      )
+          ?.whereType<Map<String, dynamic>>()
+          .map(OcmConnection.fromJson)
           .toList() ??
           const [],
     );
@@ -49,11 +46,26 @@ class OcmStationModel {
       address: addressInfo.addressLine1,
       latitude: addressInfo.latitude,
       longitude: addressInfo.longitude,
-      distanceKm: addressInfo.distance ?? 0,
-      isOperational: statusType?.isOperational ?? true,
-      isPublic: usageType?.isPublic ?? true,
+      distanceKm: addressInfo.distance ?? 0.0,
+      operationalStatus: _getOperationalStatus(),
+      isPublic: usageType?.isPublic,
       connectors: connections.map((e) => e.toEntity()).toList(),
+      source: StationSource.ocm,
     );
+  }
+
+  StationOperationalStatus _getOperationalStatus() {
+    final operational = statusType?.isOperational;
+
+    if (operational == true) {
+      return StationOperationalStatus.operational;
+    }
+
+    if (operational == false) {
+      return StationOperationalStatus.unavailable;
+    }
+
+    return StationOperationalStatus.unknown;
   }
 }
 
@@ -76,8 +88,8 @@ class OcmAddressInfo {
     return OcmAddressInfo(
       title: json['Title'] as String? ?? 'Unknown Station',
       addressLine1: json['AddressLine1'] as String? ?? '',
-      latitude: (json['Latitude'] as num?)?.toDouble() ?? 0,
-      longitude: (json['Longitude'] as num?)?.toDouble() ?? 0,
+      latitude: (json['Latitude'] as num?)?.toDouble() ?? 0.0,
+      longitude: (json['Longitude'] as num?)?.toDouble() ?? 0.0,
       distance: (json['Distance'] as num?)?.toDouble(),
     );
   }
@@ -105,8 +117,28 @@ class OcmUsageType {
   final bool? isPublic;
 
   factory OcmUsageType.fromJson(Map<String, dynamic> json) {
-    return OcmUsageType(
-      isPublic: (json['Title'] as String?) == 'Public',
+    final title = json['Title'] as String?;
+
+    if (title == null) {
+      return const OcmUsageType(
+        isPublic: null,
+      );
+    }
+
+    if (title.toLowerCase() == 'public') {
+      return const OcmUsageType(
+        isPublic: true,
+      );
+    }
+
+    if (title.toLowerCase() == 'private') {
+      return const OcmUsageType(
+        isPublic: false,
+      );
+    }
+
+    return const OcmUsageType(
+      isPublic: null,
     );
   }
 }
@@ -126,10 +158,12 @@ class OcmConnection {
 
   factory OcmConnection.fromJson(Map<String, dynamic> json) {
     return OcmConnection(
-      type: (json['ConnectionType'] as Map<String, dynamic>?)?['Title']
+      type: (json['ConnectionType']
+      as Map<String, dynamic>?)?['Title']
       as String? ??
           'Unknown',
-      currentType: (json['CurrentType'] as Map<String, dynamic>?)?['Title']
+      currentType: (json['CurrentType']
+      as Map<String, dynamic>?)?['Title']
       as String? ??
           'Unknown',
       powerKw: (json['PowerKW'] as num?)?.toDouble(),
