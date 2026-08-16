@@ -2,6 +2,7 @@ import '../../domain/entities/station.dart';
 import '../../domain/repositories/station_repository.dart';
 import '../datasources/ocm_datasource.dart';
 import '../datasources/osm_datasource.dart';
+import '../datasources/zigwheels_datasource.dart';
 import '../models/osm_station_model.dart';
 import '../utils/station_deduplicator.dart';
 
@@ -9,10 +10,12 @@ class StationRepositoryImpl implements StationRepository {
   StationRepositoryImpl(
       this._ocmDataSource,
       this._osmDataSource,
+      this._zigWheelsDataSource,
       );
 
   final OcmDataSource _ocmDataSource;
   final OsmDataSource _osmDataSource;
+  final ZigWheelsDataSource _zigWheelsDataSource;
 
   final _deduplicator = const StationDeduplicator();
 
@@ -24,9 +27,11 @@ class StationRepositoryImpl implements StationRepository {
   }) async {
     List<Station> ocmStations = [];
     List<Station> osmStations = [];
+    List<Station> zigWheelsStations = [];
 
     Object? ocmError;
     Object? osmError;
+    Object? zigWheelsError;
 
     try {
       final ocmModels =
@@ -71,19 +76,61 @@ class StationRepositoryImpl implements StationRepository {
       print('OSM failed: $e');
     }
 
-    if (ocmStations.isEmpty && osmStations.isEmpty) {
+    try {
+      final zigWheelsModels =
+      await _zigWheelsDataSource.getStations();
+
+      zigWheelsStations = zigWheelsModels
+          .map(
+            (model) => model.toEntity(
+          userLatitude: latitude,
+          userLongitude: longitude,
+        ),
+      )
+          .where(
+            (station) => station.distanceKm <= radiusKm,
+      )
+          .toList();
+
+      print(
+        'ZigWheels stations within ${radiusKm} km: '
+        '${zigWheelsStations.length}',
+      );
+    } catch (e) {
+      zigWheelsError = e;
+      print('ZigWheels failed: $e');
+    }
+
+    if (ocmStations.isEmpty &&
+        osmStations.isEmpty &&
+        zigWheelsStations.isEmpty) {
       throw Exception(
         'No stations could be loaded.\n'
             'OCM: ${ocmError ?? "No data"}\n'
-            'OSM: ${osmError ?? "No data"}',
+            'OSM: ${osmError ?? "No data"}\n'
+            'ZigWheels: ${zigWheelsError ?? "No data"}',
       );
     }
 
     final combined = [
       ...ocmStations,
       ...osmStations,
+      ...zigWheelsStations,
     ];
 
-    return _deduplicator.deduplicate(combined);
+    final deduplicated =
+        _deduplicator.deduplicate(combined);
+
+    print('OCM stations: ${ocmStations.length}');
+    print('OSM stations: ${osmStations.length}');
+    print(
+      'ZigWheels stations: ${zigWheelsStations.length}',
+    );
+    print('Combined stations: ${combined.length}');
+    print(
+      'After deduplication: ${deduplicated.length}',
+    );
+
+    return deduplicated;
   }
 }

@@ -8,65 +8,99 @@ class StationCard extends StatelessWidget {
     required this.station,
   });
 
+  static const _blue = Color(0xFF2563EB);
+
   final Station station;
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 1,
+      margin: const EdgeInsets.only(bottom: 9),
+      elevation: 0,
+      color: Colors.white,
+      surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: Colors.black.withValues(alpha: 0.06),
+        ),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(
+          14,
+          13,
+          14,
+          12,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              station.name,
-              style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.bold,
-              ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    station.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 15.5,
+                      height: 1.2,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _blue.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${station.distanceKm.toStringAsFixed(1)} km',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF2563EB),
+                    ),
+                  ),
+                ),
+              ],
             ),
 
-            const SizedBox(height: 6),
+            const SizedBox(height: 5),
 
             Text(
               station.address,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 13,
+                fontSize: 12.5,
                 color: Colors.grey.shade700,
               ),
             ),
 
             const SizedBox(height: 8),
 
-            Text(
-              '${station.distanceKm.toStringAsFixed(1)} km away',
-              style: const TextStyle(
-                fontSize: 13,
-              ),
-            ),
+            Row(
+              children: [
+                _StatusIndicator(
+                  status: station.operationalStatus,
+                ),
 
-            const SizedBox(height: 10),
-
-            _StatusIndicator(
-              status: station.operationalStatus,
-            ),
-
-            const SizedBox(height: 12),
-
-            if (_hasConnectorInformation)
-              _ConnectorInformation(
-                connectors: station.connectors,
-              ),
-
-            const SizedBox(height: 10),
-
-            _SourceLabel(
-              source: station.source,
+                if (_hasConnectorInformation) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _ConnectorInformation(
+                      connectors: station.connectors,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ],
         ),
@@ -90,28 +124,33 @@ class _ConnectorInformation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: connectors.map((connector) {
-        return Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 6,
-          ),
-          decoration: BoxDecoration(
-            color: Colors.blueGrey.shade50,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(
-            _connectorText(connector),
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: connectors.map((connector) {
+          return Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 4,
+              ),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F5FF),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                _connectorText(connector),
+                style: const TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF2563EB),
+                ),
+              ),
             ),
-          ),
-        );
-      }).toList(),
+          );
+        }).toList(),
+      ),
     );
   }
 
@@ -128,35 +167,6 @@ class _ConnectorInformation extends StatelessWidget {
   }
 }
 
-class _SourceLabel extends StatelessWidget {
-  const _SourceLabel({
-    required this.source,
-  });
-
-  final StationSource source;
-
-  @override
-  Widget build(BuildContext context) {
-    final String text;
-
-    switch (source) {
-      case StationSource.ocm:
-        text = 'Source: Open Charge Map';
-
-      case StationSource.osm:
-        text = 'Source: OpenStreetMap';
-    }
-
-    return Text(
-      text,
-      style: TextStyle(
-        fontSize: 11,
-        color: Colors.grey.shade600,
-      ),
-    );
-  }
-}
-
 class _StatusIndicator extends StatelessWidget {
   const _StatusIndicator({
     required this.status,
@@ -168,62 +178,58 @@ class _StatusIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     switch (status) {
       case StationOperationalStatus.operational:
-        return const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.circle,
-              size: 10,
-              color: Colors.green,
-            ),
-            SizedBox(width: 6),
-            Text(
-              'Operational',
-              style: TextStyle(
-                fontSize: 12,
-              ),
-            ),
-          ],
+        return const _StatusRow(
+          color: Colors.green,
+          label: 'Operational',
         );
 
       case StationOperationalStatus.unavailable:
-        return const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.circle,
-              size: 10,
-              color: Colors.red,
-            ),
-            SizedBox(width: 6),
-            Text(
-              'Unavailable',
-              style: TextStyle(
-                fontSize: 12,
-              ),
-            ),
-          ],
+        return const _StatusRow(
+          color: Colors.red,
+          label: 'Unavailable',
         );
 
       case StationOperationalStatus.unknown:
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.circle,
-              size: 10,
-              color: Colors.grey,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              'Status unknown',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey.shade700,
-              ),
-            ),
-          ],
+        return _StatusRow(
+          color: Colors.grey,
+          label: 'Status unknown',
+          textColor: Colors.grey,
         );
     }
+  }
+}
+
+class _StatusRow extends StatelessWidget {
+  const _StatusRow({
+    required this.color,
+    required this.label,
+    this.textColor,
+  });
+
+  final Color color;
+  final String label;
+  final Color? textColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          Icons.circle,
+          size: 8,
+          color: color,
+        ),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10.5,
+            color: textColor,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
   }
 }

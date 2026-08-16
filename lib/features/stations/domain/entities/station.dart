@@ -27,6 +27,7 @@ class Station {
 enum StationSource {
   ocm,
   osm,
+  zigwheels,
 }
 
 enum StationOperationalStatus {

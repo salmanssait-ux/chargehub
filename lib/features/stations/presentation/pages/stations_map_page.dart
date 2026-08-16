@@ -9,15 +9,21 @@ class StationsMapPage extends StatefulWidget {
   const StationsMapPage({
     super.key,
     required this.stations,
+    this.selectedStation,
+    required this.onStationSelected,
   });
 
   final List<Station> stations;
+  final Station? selectedStation;
+  final ValueChanged<Station> onStationSelected;
 
   @override
   State<StationsMapPage> createState() => _StationsMapPageState();
 }
 
 class _StationsMapPageState extends State<StationsMapPage> {
+  static const _blue = Color(0xFF2563EB);
+
   Position? _currentPosition;
 
   @override
@@ -43,8 +49,7 @@ class _StationsMapPageState extends State<StationsMapPage> {
         return;
       }
 
-      final position =
-      await Geolocator.getCurrentPosition();
+      final position = await Geolocator.getCurrentPosition();
 
       if (!mounted) {
         return;
@@ -62,7 +67,9 @@ class _StationsMapPageState extends State<StationsMapPage> {
   Widget build(BuildContext context) {
     if (_currentPosition == null) {
       return const Center(
-        child: CircularProgressIndicator(),
+        child: CircularProgressIndicator(
+          color: _blue,
+        ),
       );
     }
 
@@ -72,36 +79,59 @@ class _StationsMapPageState extends State<StationsMapPage> {
     );
 
     final markers = <Marker>[
+      // User location
       Marker(
         point: userLocation,
-        width: 45,
-        height: 45,
-        child: const Icon(
-          Icons.my_location,
-          size: 30,
-          color: Colors.blue,
+        width: 32,
+        height: 32,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: _blue,
+              width: 3,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: _blue.withValues(alpha: 0.25),
+                blurRadius: 8,
+              ),
+            ],
+          ),
+          child: const Center(
+            child: SizedBox(
+              width: 9,
+              height: 9,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: _blue,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
+
+      // Charging stations
       ...widget.stations.map(
-            (station) {
+        (station) {
+          final isSelected = widget.selectedStation == station;
+
           return Marker(
             point: LatLng(
               station.latitude,
               station.longitude,
             ),
-            width: 46,
-            height: 46,
+            width: isSelected ? 42 : 30,
+            height: isSelected ? 50 : 38,
             child: GestureDetector(
               onTap: () {
-                _showStationDetails(
-                  context,
-                  station,
-                );
+                widget.onStationSelected(station);
               },
-              child: const Icon(
-                Icons.ev_station,
-                size: 34,
-                color: Colors.green,
+              child: _ChargerPin(
+                selected: isSelected,
               ),
             ),
           );
@@ -109,104 +139,101 @@ class _StationsMapPageState extends State<StationsMapPage> {
       ),
     ];
 
-    return FlutterMap(
-      options: MapOptions(
-        initialCenter: userLocation,
-        initialZoom: 12,
-      ),
+    return Stack(
       children: [
-        TileLayer(
-          urlTemplate:
-          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.salman.chargehub',
-        ),
-        MarkerLayer(
-          markers: markers,
-        ),
-        RichAttributionWidget(
-          attributions: [
-            TextSourceAttribution(
-              'OpenStreetMap contributors',
+        FlutterMap(
+          options: MapOptions(
+            initialCenter: userLocation,
+            initialZoom: 12,
+          ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.salman.chargehub',
+            ),
+            MarkerLayer(
+              markers: markers,
             ),
           ],
+        ),
+
+        // OpenStreetMap attribution
+        Positioned(
+          left: 6,
+          bottom: 4,
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 5,
+              vertical: 3,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.85),
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: const Text(
+              '© OpenStreetMap contributors',
+              style: TextStyle(
+                fontSize: 7,
+                color: Colors.black54,
+              ),
+            ),
+          ),
+        ),
+
+        // Recenter button
+        Positioned(
+          right: 12,
+          bottom: 12,
+          child: Material(
+            color: Colors.white,
+            elevation: 4,
+            shadowColor: Colors.black26,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: _loadCurrentLocation,
+              child: const SizedBox(
+                width: 44,
+                height: 44,
+                child: Icon(
+                  Icons.my_location_rounded,
+                  color: _blue,
+                  size: 21,
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     );
   }
+}
 
-  void _showStationDetails(
-      BuildContext context,
-      Station station,
-      ) {
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment:
-                CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    station.name,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(station.address),
-                  const SizedBox(height: 8),
-                  Text(
-                    '${station.distanceKm.toStringAsFixed(1)} km away',
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    _statusText(
-                      station.operationalStatus,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  ...station.connectors.map(
-                        (connector) {
-                      final power = connector.powerKw != null
-                          ? ' • ${connector.powerKw!.toStringAsFixed(1)} kW'
-                          : '';
 
-                      return Padding(
-                        padding:
-                        const EdgeInsets.only(bottom: 4),
-                        child: Text(
-                          '${connector.type} × ${connector.quantity}$power',
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+class _ChargerPin extends StatelessWidget {
+  const _ChargerPin({
+    this.selected = false,
+  });
+
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      child: Icon(
+        Icons.location_on_rounded,
+        size: selected ? 40 : 30,
+        color: selected ? const Color(0xFF1D4ED8) : const Color(0xFF2563EB),
+        shadows: selected
+            ? const [
+                Shadow(
+                  color: Colors.white,
+                  blurRadius: 5,
+                ),
+              ]
+            : null,
+      ),
     );
-  }
-
-  String _statusText(
-      StationOperationalStatus status,
-      ) {
-    switch (status) {
-      case StationOperationalStatus.operational:
-        return '🟢 Operational';
-
-      case StationOperationalStatus.unavailable:
-        return '🔴 Unavailable';
-
-      case StationOperationalStatus.unknown:
-        return '⚪ Status unknown';
-    }
   }
 }

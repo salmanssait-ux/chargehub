@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers/common_providers.dart';
 import 'data/datasources/ocm_datasource.dart';
 import 'data/datasources/osm_datasource.dart';
+import 'data/datasources/zigwheels_datasource.dart';
 import 'data/repositories/station_repository_impl.dart';
 import 'domain/repositories/station_repository.dart';
 
@@ -16,12 +17,18 @@ final osmDataSourceProvider = Provider<OsmDataSource>((ref) {
   return OsmDataSource(client);
 });
 
+final zigWheelsDataSourceProvider = Provider<ZigWheelsDataSource>((ref) {
+  return const ZigWheelsDataSource();
+});
+
 final stationRepositoryProvider = Provider<StationRepository>((ref) {
   final ocmDataSource = ref.watch(ocmDataSourceProvider);
   final osmDataSource = ref.watch(osmDataSourceProvider);
+  final zigWheelsDataSource = ref.watch(zigWheelsDataSourceProvider);
 
   return StationRepositoryImpl(
     ocmDataSource,
     osmDataSource,
+    zigWheelsDataSource,
   );
 });
