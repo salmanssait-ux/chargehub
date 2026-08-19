@@ -93,7 +93,7 @@ class StationRepositoryImpl implements StationRepository {
           .toList();
 
       print(
-        'ZigWheels stations within ${radiusKm} km: '
+        'ZigWheels stations within $radiusKm km: '
         '${zigWheelsStations.length}',
       );
     } catch (e) {

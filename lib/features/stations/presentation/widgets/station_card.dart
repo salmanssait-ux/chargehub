@@ -8,83 +8,80 @@ class StationCard extends StatelessWidget {
     required this.station,
   });
 
-  static const _blue = Color(0xFF2563EB);
-
   final Station station;
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Card(
-      margin: const EdgeInsets.only(bottom: 9),
+      margin: const EdgeInsets.only(bottom: 10),
       elevation: 0,
-      color: Colors.white,
+      color: colorScheme.surfaceContainer,
       surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: Colors.black.withValues(alpha: 0.06),
-        ),
-      ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          14,
-          13,
-          14,
-          12,
-        ),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: Text(
                     station.name,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 15.5,
-                      height: 1.2,
+                    style: TextStyle(
+                      fontSize: 15,
                       fontWeight: FontWeight.w700,
+                      color: colorScheme.onSurface,
                     ),
                   ),
                 ),
-                const SizedBox(width: 10),
+
+                const SizedBox(width: 8),
+
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 9,
                     vertical: 5,
                   ),
                   decoration: BoxDecoration(
-                    color: _blue.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(20),
+                    color: colorScheme.primary.withValues(
+                      alpha: 0.10,
+                    ),
+                    borderRadius:
+                    BorderRadius.circular(20),
                   ),
                   child: Text(
                     '${station.distanceKm.toStringAsFixed(1)} km',
-                    style: const TextStyle(
-                      fontSize: 11,
+                    style: TextStyle(
+                      fontSize: 10,
                       fontWeight: FontWeight.w700,
-                      color: Color(0xFF2563EB),
+                      color: colorScheme.primary,
                     ),
                   ),
                 ),
               ],
             ),
 
-            const SizedBox(height: 5),
+            const SizedBox(height: 7),
 
             Text(
-              station.address,
-              maxLines: 1,
+              station.address.isEmpty
+                  ? 'Address unavailable'
+                  : station.address,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 12.5,
-                color: Colors.grey.shade700,
+                fontSize: 12,
+                color: colorScheme.onSurfaceVariant,
               ),
             ),
 
-            const SizedBox(height: 8),
+            const SizedBox(height: 9),
 
             Row(
               children: [
@@ -92,14 +89,14 @@ class StationCard extends StatelessWidget {
                   status: station.operationalStatus,
                 ),
 
-                if (_hasConnectorInformation) ...[
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _ConnectorInformation(
+                const SizedBox(width: 10),
+
+                if (_hasConnectorInformation)
+                  Flexible(
+                    child: _ConnectorPreview(
                       connectors: station.connectors,
                     ),
                   ),
-                ],
               ],
             ),
           ],
@@ -115,8 +112,12 @@ class StationCard extends StatelessWidget {
   }
 }
 
-class _ConnectorInformation extends StatelessWidget {
-  const _ConnectorInformation({
+// ═══════════════════════════════════════════════════════
+// CONNECTOR
+// ═══════════════════════════════════════════════════════
+
+class _ConnectorPreview extends StatelessWidget {
+  const _ConnectorPreview({
     required this.connectors,
   });
 
@@ -124,48 +125,44 @@ class _ConnectorInformation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: connectors.map((connector) {
-          return Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 4,
-              ),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF0F5FF),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                _connectorText(connector),
-                style: const TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF2563EB),
-                ),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
+    final colorScheme = Theme.of(context).colorScheme;
 
-  String _connectorText(Connector connector) {
+    final connector = connectors.firstWhere(
+          (connector) => connector.type != 'Unknown',
+      orElse: () => connectors.first,
+    );
+
     final quantity = connector.quantity > 1
         ? ' × ${connector.quantity}'
         : '';
 
-    final power = connector.powerKw != null
-        ? ' • ${connector.powerKw!.toStringAsFixed(1)} kW'
-        : '';
-
-    return '${connector.type}$quantity$power';
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 5,
+      ),
+      decoration: BoxDecoration(
+        color: colorScheme.primary.withValues(
+          alpha: 0.08,
+        ),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Text(
+        '${connector.type}$quantity',
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: colorScheme.primary,
+        ),
+      ),
+    );
   }
 }
+
+// ═══════════════════════════════════════════════════════
+// STATUS
+// ═══════════════════════════════════════════════════════
 
 class _StatusIndicator extends StatelessWidget {
   const _StatusIndicator({
@@ -176,60 +173,69 @@ class _StatusIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     switch (status) {
       case StationOperationalStatus.operational:
-        return const _StatusRow(
-          color: Colors.green,
-          label: 'Operational',
+        return const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.circle,
+              size: 8,
+              color: Colors.green,
+            ),
+            SizedBox(width: 5),
+            Text(
+              'Operational',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
         );
 
       case StationOperationalStatus.unavailable:
-        return const _StatusRow(
-          color: Colors.red,
-          label: 'Unavailable',
+        return const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.circle,
+              size: 8,
+              color: Colors.red,
+            ),
+            SizedBox(width: 5),
+            Text(
+              'Unavailable',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
         );
 
       case StationOperationalStatus.unknown:
-        return _StatusRow(
-          color: Colors.grey,
-          label: 'Status unknown',
-          textColor: Colors.grey,
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.circle,
+              size: 8,
+              color: Colors.grey,
+            ),
+            const SizedBox(width: 5),
+            Text(
+              'Status unknown',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         );
     }
-  }
-}
-
-class _StatusRow extends StatelessWidget {
-  const _StatusRow({
-    required this.color,
-    required this.label,
-    this.textColor,
-  });
-
-  final Color color;
-  final String label;
-  final Color? textColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          Icons.circle,
-          size: 8,
-          color: color,
-        ),
-        const SizedBox(width: 5),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 10.5,
-            color: textColor,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
-    );
   }
 }
