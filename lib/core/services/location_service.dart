@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
 class LocationService {
@@ -20,10 +21,18 @@ class LocationService {
       throw Exception('Location permission permanently denied.');
     }
 
+    if (!kIsWeb) {
+      final lastKnownPosition = await Geolocator.getLastKnownPosition();
+
+      if (lastKnownPosition != null) {
+        return lastKnownPosition;
+      }
+    }
+
     return Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        timeLimit: Duration(seconds: 10),
+        accuracy: LocationAccuracy.medium,
+        timeLimit: Duration(seconds: 8),
       ),
     );
   }

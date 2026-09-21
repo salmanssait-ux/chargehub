@@ -69,13 +69,6 @@ class _StationsPageState
     });
   }
 
-  void _clearFilters() {
-    setState(() {
-      _maxDistanceKm = 20;
-      _statusFilter = null;
-    });
-  }
-
   bool get _hasActiveFilters => _maxDistanceKm < 20 || _statusFilter != null;
 
   void _showFilters() {
@@ -176,6 +169,15 @@ class _StationsPageState
                     spacing: 8,
                     children: [
                       ChoiceChip(
+                        label: const Text('All'),
+                        selected: status == null,
+                        onSelected: (_) {
+                          setSheetState(() {
+                            status = null;
+                          });
+                        },
+                      ),
+                      ChoiceChip(
                         label: const Text(
                           'Operational',
                         ),
@@ -253,18 +255,28 @@ class _StationsPageState
   }
 
   Future<void> _openGoogleMaps(
-      Station station,
-      ) async {
+    Station station,
+  ) async {
     final uri = Uri.parse(
       'https://www.google.com/maps/search/?api=1'
-          '&query=${station.latitude},${station.longitude}',
+      '&query=${station.latitude},${station.longitude}',
     );
 
     try {
-      await launchUrl(
+      final launched = await launchUrl(
         uri,
         mode: LaunchMode.externalApplication,
       );
+
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not open Google Maps',
+            ),
+          ),
+        );
+      }
     } catch (_) {
       if (!mounted) {
         return;
@@ -327,13 +339,9 @@ class _StationsPageState
         onTap: _dismissKeyboard,
         child: stationsAsync.when(
           loading: () {
-            return Center(
-              child: CircularProgressIndicator(
-                color: colorScheme.primary,
-              ),
-            );
+            return const _StationsPageSkeleton();
           },
-          error: (error, stack) {
+          error: (_, _) {
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(20),
@@ -347,7 +355,7 @@ class _StationsPageState
                     ),
                     const SizedBox(height: 14),
                     Text(
-                      'Unable to load charging stations',
+                      'Unable to get your location',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 16,
@@ -357,12 +365,20 @@ class _StationsPageState
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '$error',
+                      'Check that location services are enabled, then try again.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 12,
                         color: colorScheme.onSurfaceVariant,
                       ),
+                    ),
+                    const SizedBox(height: 18),
+                    FilledButton.icon(
+                      onPressed: () {
+                        ref.read(nearbyStationsProvider.notifier).retry();
+                      },
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('Try again'),
                     ),
                   ],
                 ),
@@ -557,6 +573,86 @@ class _StationsPageState
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+class _StationsPageSkeleton extends StatelessWidget {
+  const _StationsPageSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Expanded(child: _SkeletonBlock(height: 50)),
+              const SizedBox(width: 8),
+              const _SkeletonBlock(width: 50, height: 50),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            flex: 6,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.primaryContainer.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: const Stack(
+                children: [
+                  Positioned(
+                    left: 20,
+                    top: 22,
+                    child: _SkeletonBlock(width: 94, height: 26),
+                  ),
+                  Center(
+                    child: Icon(Icons.map_rounded, size: 44),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Expanded(
+            flex: 5,
+            child: ListView.separated(
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: 3,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              itemBuilder: (_, _) => const _SkeletonBlock(height: 82),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SkeletonBlock extends StatelessWidget {
+  const _SkeletonBlock({
+    this.width,
+    required this.height,
+  });
+
+  final double? width;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(16),
       ),
     );
   }

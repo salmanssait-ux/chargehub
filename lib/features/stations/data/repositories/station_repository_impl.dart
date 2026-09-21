@@ -19,112 +19,84 @@ class StationRepositoryImpl implements StationRepository {
 
   final _deduplicator = const StationDeduplicator();
 
+  static const _remoteLoadTimeout = Duration(seconds: 12);
+
+  @override
+  Future<List<Station>> getNearbyLocalStations({
+    required double latitude,
+    required double longitude,
+    double radiusKm = 10,
+  }) async {
+    final result = await _loadZigWheelsStations(
+      latitude: latitude,
+      longitude: longitude,
+      radiusKm: radiusKm,
+    );
+
+    if (result.error != null) {
+      throw result.error!;
+    }
+
+    return result.stations;
+  }
+
   @override
   Future<List<Station>> getNearbyStations({
     required double latitude,
     required double longitude,
     double radiusKm = 10,
   }) async {
-    List<Station> ocmStations = [];
-    List<Station> osmStations = [];
-    List<Station> zigWheelsStations = [];
-
-    Object? ocmError;
-    Object? osmError;
-    Object? zigWheelsError;
-
-    try {
-      final ocmModels =
-      await _ocmDataSource.getNearbyStations(
+    final sourceResults = await Future.wait([
+      _loadOcmStations(
         latitude: latitude,
         longitude: longitude,
-        distanceKm: radiusKm,
-        maxResults: 100,
-      );
-
-      ocmStations = ocmModels
-          .map((model) => model.toEntity())
-          .toList();
-    } catch (e) {
-      ocmError = e;
-      print('OCM failed: $e');
-    }
-
-    try {
-      final osmJson =
-      await _osmDataSource.getNearbyStations(
+        radiusKm: radiusKm,
+      ),
+      _loadOsmStations(
         latitude: latitude,
         longitude: longitude,
-        distanceKm: radiusKm,
-      );
-
-      for (final json in osmJson) {
-        try {
-          final station = OsmStationModel.fromJson(
-            json,
-            userLat: latitude,
-            userLon: longitude,
-          ).toEntity();
-
-          osmStations.add(station);
-        } catch (e) {
-          print('OSM station parse failed: $e');
-        }
-      }
-    } catch (e) {
-      osmError = e;
-      print('OSM failed: $e');
-    }
-
-    try {
-      final zigWheelsModels =
-      await _zigWheelsDataSource.getStations();
-
-      zigWheelsStations = zigWheelsModels
-          .map(
-            (model) => model.toEntity(
-          userLatitude: latitude,
-          userLongitude: longitude,
+        radiusKm: radiusKm,
+      ).timeout(
+        _remoteLoadTimeout,
+        onTimeout: () => const _StationLoadResult(
+          error: 'Timed out while loading OSM stations.',
         ),
-      )
-          .where(
-            (station) => station.distanceKm <= radiusKm,
-      )
-          .toList();
+      ),
+      _loadZigWheelsStations(
+        latitude: latitude,
+        longitude: longitude,
+        radiusKm: radiusKm,
+      ),
+    ]);
 
-      print(
-        'ZigWheels stations within $radiusKm km: '
-        '${zigWheelsStations.length}',
-      );
-    } catch (e) {
-      zigWheelsError = e;
-      print('ZigWheels failed: $e');
-    }
+    final ocmResult = sourceResults[0];
+    final osmResult = sourceResults[1];
+    final zigWheelsResult = sourceResults[2];
 
-    if (ocmStations.isEmpty &&
-        osmStations.isEmpty &&
-        zigWheelsStations.isEmpty) {
+    if (ocmResult.stations.isEmpty &&
+        osmResult.stations.isEmpty &&
+        zigWheelsResult.stations.isEmpty) {
       throw Exception(
         'No stations could be loaded.\n'
-            'OCM: ${ocmError ?? "No data"}\n'
-            'OSM: ${osmError ?? "No data"}\n'
-            'ZigWheels: ${zigWheelsError ?? "No data"}',
+            'OCM: ${ocmResult.error ?? "No data"}\n'
+            'OSM: ${osmResult.error ?? "No data"}\n'
+            'ZigWheels: ${zigWheelsResult.error ?? "No data"}',
       );
     }
 
     final combined = [
-      ...ocmStations,
-      ...osmStations,
-      ...zigWheelsStations,
+      ...ocmResult.stations,
+      ...osmResult.stations,
+      ...zigWheelsResult.stations,
     ];
 
     final deduplicated =
         _deduplicator.deduplicate(combined);
 
-    print('OCM stations: ${ocmStations.length}');
-    print('OSM stations: ${osmStations.length}');
+    print('OCM stations: ${ocmResult.stations.length}');
+    print('OSM stations: ${osmResult.stations.length}');
     print(
-      'ZigWheels stations: ${zigWheelsStations.length}',
+      'ZigWheels stations: ${zigWheelsResult.stations.length}',
     );
     print('Combined stations: ${combined.length}');
     print(
@@ -133,4 +105,95 @@ class StationRepositoryImpl implements StationRepository {
 
     return deduplicated;
   }
+
+  Future<_StationLoadResult> _loadOcmStations({
+    required double latitude,
+    required double longitude,
+    required double radiusKm,
+  }) async {
+    try {
+      final models = await _ocmDataSource.getNearbyStations(
+        latitude: latitude,
+        longitude: longitude,
+        distanceKm: radiusKm,
+        maxResults: 100,
+      );
+
+      return _StationLoadResult(
+        stations: models.map((model) => model.toEntity()).toList(),
+      );
+    } catch (error) {
+      print('OCM failed: $error');
+      return _StationLoadResult(error: error);
+    }
+  }
+
+  Future<_StationLoadResult> _loadOsmStations({
+    required double latitude,
+    required double longitude,
+    required double radiusKm,
+  }) async {
+    try {
+      final jsonStations = await _osmDataSource.getNearbyStations(
+        latitude: latitude,
+        longitude: longitude,
+        distanceKm: radiusKm,
+      );
+      final stations = <Station>[];
+
+      for (final json in jsonStations) {
+        try {
+          stations.add(
+            OsmStationModel.fromJson(
+              json,
+              userLat: latitude,
+              userLon: longitude,
+            ).toEntity(),
+          );
+        } catch (error) {
+          print('OSM station parse failed: $error');
+        }
+      }
+
+      return _StationLoadResult(stations: stations);
+    } catch (error) {
+      print('OSM failed: $error');
+      return _StationLoadResult(error: error);
+    }
+  }
+
+  Future<_StationLoadResult> _loadZigWheelsStations({
+    required double latitude,
+    required double longitude,
+    required double radiusKm,
+  }) async {
+    try {
+      final models = await _zigWheelsDataSource.getStations();
+      final stations = models
+          .map(
+            (model) => model.toEntity(
+              userLatitude: latitude,
+              userLongitude: longitude,
+            ),
+          )
+          .where((station) => station.distanceKm <= radiusKm)
+          .toList();
+
+      print('ZigWheels stations within $radiusKm km: ${stations.length}');
+      return _StationLoadResult(stations: stations);
+    } catch (error) {
+      print('ZigWheels failed: $error');
+      return _StationLoadResult(error: error);
+    }
+  }
+}
+
+class _StationLoadResult {
+  const _StationLoadResult({
+    this.stations = const [],
+    this.error,
+  });
+
+  final List<Station> stations;
+  final Object? error;
 }

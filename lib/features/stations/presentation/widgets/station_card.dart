@@ -97,6 +97,14 @@ class StationCard extends StatelessWidget {
                       connectors: station.connectors,
                     ),
                   ),
+
+                const Spacer(),
+
+                Icon(
+                  Icons.arrow_forward_rounded,
+                  size: 17,
+                  color: colorScheme.primary,
+                ),
               ],
             ),
           ],

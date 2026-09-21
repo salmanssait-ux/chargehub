@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -25,66 +25,42 @@ class StationsMapPage extends StatefulWidget {
   State<StationsMapPage> createState() => _StationsMapPageState();
 }
 
-class _StationsMapPageState extends State<StationsMapPage> {
+class _StationsMapPageState extends State<StationsMapPage>
+    with WidgetsBindingObserver {
   MapLibreMapController? _mapController;
 
   Position? _currentPosition;
 
   bool _mapReady = false;
   bool _locationLoading = true;
+  bool _imagesRegistered = false;
+  bool _showLocationPrompt = true;
+  bool _locationServiceDisabled = false;
 
   final Map<String, Station> _symbols = {};
 
-  static const _fallbackLocation = LatLng(
-    19.0760,
-    72.8777,
-  );
+  static const _fallbackLocation = LatLng(19.0760, 72.8777);
 
   // ─────────────────────────────────────────────
   // Map style
   // ─────────────────────────────────────────────
 
   String get _mapStyleUrl {
-    final apiKey = dotenv.env['STADIA_MAPS_API_KEY'];
+    final apiKey = dotenv.env['STADIA_MAPS_API_KEY']?.trim();
+    final isDark = Theme.of(context).colorScheme.brightness == Brightness.dark;
 
     if (apiKey == null || apiKey.isEmpty) {
-      return jsonEncode({
-        'version': 8,
-        'sources': {},
-        'layers': [],
-      });
+      return 'https://tiles.openfreemap.org/styles/liberty';
     }
-
-    final isDark =
-        Theme.of(context).colorScheme.brightness == Brightness.dark;
 
     final style = isDark ? 'alidade_smooth_dark' : 'alidade_smooth';
 
-    final tileUrl = 'https://tiles.stadiamaps.com/tiles/'
-        '$style/{z}/{x}/{y}.png'
+    final tileUrl =
+        'https://tiles.stadiamaps.com/styles/'
+        '$style.json'
         '?api_key=$apiKey';
 
-    return jsonEncode({
-      'version': 8,
-      'sources': {
-        'stadia': {
-          'type': 'raster',
-          'tiles': [tileUrl],
-          'tileSize': 256,
-          'minzoom': 0,
-          'maxzoom': 20,
-        },
-      },
-      'layers': [
-        {
-          'id': 'stadia-basemap',
-          'type': 'raster',
-          'source': 'stadia',
-          'minzoom': 0,
-          'maxzoom': 20,
-        },
-      ],
-    });
+    return tileUrl;
   }
 
   String get _mapKey {
@@ -104,10 +80,7 @@ class _StationsMapPageState extends State<StationsMapPage> {
       return _fallbackLocation;
     }
 
-    return LatLng(
-      position.latitude,
-      position.longitude,
-    );
+    return LatLng(position.latitude, position.longitude);
   }
 
   // ─────────────────────────────────────────────
@@ -117,13 +90,15 @@ class _StationsMapPageState extends State<StationsMapPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    MapLibreMap.useHybridComposition = true;
     _loadCurrentLocation();
   }
 
   Future<void> _loadCurrentLocation() async {
     try {
       if (!await Geolocator.isLocationServiceEnabled()) {
-        _finishLocationLoading();
+        _finishLocationLoading(showPrompt: true, serviceDisabled: true);
         return;
       }
 
@@ -135,21 +110,24 @@ class _StationsMapPageState extends State<StationsMapPage> {
 
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        _finishLocationLoading();
+        _finishLocationLoading(showPrompt: true);
         return;
       }
 
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 8),
         ),
-      );
+      ).timeout(const Duration(seconds: 10));
 
       if (!mounted) return;
 
       setState(() {
         _currentPosition = position;
         _locationLoading = false;
+        _showLocationPrompt = false;
+        _locationServiceDisabled = false;
       });
 
       if (_mapReady) {
@@ -157,16 +135,42 @@ class _StationsMapPageState extends State<StationsMapPage> {
         await _refreshMarkers();
       }
     } catch (_) {
-      _finishLocationLoading();
+      _finishLocationLoading(showPrompt: true);
     }
   }
 
-  void _finishLocationLoading() {
+  void _finishLocationLoading({
+    bool showPrompt = false,
+    bool serviceDisabled = false,
+  }) {
     if (!mounted) return;
 
     setState(() {
       _locationLoading = false;
+      _showLocationPrompt = showPrompt;
+      _locationServiceDisabled = serviceDisabled;
     });
+  }
+
+  Future<void> _enableLocation() async {
+    if (_locationServiceDisabled) {
+      await Geolocator.openLocationSettings();
+    } else {
+      final permission = await Geolocator.requestPermission();
+
+      if (permission == LocationPermission.deniedForever) {
+        await Geolocator.openAppSettings();
+      }
+    }
+
+    await _loadCurrentLocation();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _showLocationPrompt) {
+      _loadCurrentLocation();
+    }
   }
 
   // ─────────────────────────────────────────────
@@ -183,22 +187,96 @@ class _StationsMapPageState extends State<StationsMapPage> {
     if (!mounted) return;
 
     _mapReady = true;
+    _imagesRegistered = false;
 
+    await _tintRoadLayers();
     await _refreshMarkers();
+
+    // The initial camera position is only used while the map is created.
+    // Location may have resolved before the style finished loading, so move
+    // the camera explicitly once the map can accept camera updates.
+    await _moveToCurrentLocation();
+
+    final selectedStation = widget.selectedStation;
+    if (selectedStation != null) {
+      await _moveToStation(selectedStation);
+    }
+  }
+
+  Future<void> _tintRoadLayers() async {
+    final controller = _mapController;
+    if (controller == null) return;
+
+    final scheme = Theme.of(context).colorScheme;
+    final minorRoadColor = Color.lerp(
+      scheme.surface,
+      scheme.primary,
+      scheme.brightness == Brightness.dark ? 0.28 : 0.24,
+    )!;
+    final majorRoadColor = Color.lerp(
+      scheme.surface,
+      scheme.primary,
+      scheme.brightness == Brightness.dark ? 0.46 : 0.40,
+    )!;
+    final layerIds = await controller.getLayerIds();
+
+    for (final layerId in layerIds) {
+      final id = layerId.toString().toLowerCase();
+      if (!id.contains('road') &&
+          !id.contains('street') &&
+          !id.contains('highway') &&
+          !id.contains('motorway') &&
+          !id.contains('transport')) {
+        continue;
+      }
+
+      final isMajorRoad =
+          id.contains('motorway') ||
+          id.contains('trunk') ||
+          id.contains('highway') ||
+          id.contains('primary');
+
+      await controller.setLayerProperties(
+        layerId.toString(),
+        LineLayerProperties(
+          lineColor: _colorHex(isMajorRoad ? majorRoadColor : minorRoadColor),
+          lineWidth: 0.7,
+          lineOpacity: isMajorRoad ? 0.95 : 0.84,
+        ),
+      );
+    }
+  }
+
+  String _colorHex(Color color) {
+    final value = color.toARGB32().toRadixString(16).padLeft(8, '0');
+    return '#${value.substring(2)}';
   }
 
   @override
   void didUpdateWidget(covariant StationsMapPage oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    if (oldWidget.selectedStation?.id !=
-        widget.selectedStation?.id ||
-        oldWidget.stations.length != widget.stations.length) {
+    final selectionChanged =
+        oldWidget.selectedStation?.id != widget.selectedStation?.id;
+    final stationsChanged = oldWidget.stations.length != widget.stations.length;
+
+    if (selectionChanged || stationsChanged) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _mapReady) {
-          _refreshMarkers();
+          _updateMapForWidgetChange(moveToSelectedStation: selectionChanged);
         }
       });
+    }
+  }
+
+  Future<void> _updateMapForWidgetChange({
+    required bool moveToSelectedStation,
+  }) async {
+    await _refreshMarkers();
+
+    final selectedStation = widget.selectedStation;
+    if (moveToSelectedStation && selectedStation != null) {
+      await _moveToStation(selectedStation);
     }
   }
 
@@ -221,31 +299,53 @@ class _StationsMapPageState extends State<StationsMapPage> {
 
     _symbols.clear();
 
-    await controller.addImage(
-      'chargehub_charger',
-      await _createChargerPin(
-        primary: scheme.primary,
-        surface: scheme.surface,
-        selected: false,
-      ),
-    );
+    if (!_imagesRegistered) {
+      _imagesRegistered = true;
 
-    await controller.addImage(
-      'chargehub_charger_selected',
-      await _createChargerPin(
-        primary: scheme.primary,
-        surface: scheme.surface,
-        selected: true,
-      ),
-    );
+      await controller.addImage(
+        'chargehub_charger_operational',
+        await _createChargerPin(
+          color: scheme.primary,
+          surface: scheme.surface,
+          selected: false,
+        ),
+      );
 
-    await controller.addImage(
-      'chargehub_location',
-      await _createLocationMarker(
-        primary: scheme.primary,
-        surface: scheme.surface,
-      ),
-    );
+      await controller.addImage(
+        'chargehub_charger_unavailable',
+        await _createChargerPin(
+          color: scheme.error,
+          surface: scheme.surface,
+          selected: false,
+        ),
+      );
+
+      await controller.addImage(
+        'chargehub_charger_unknown',
+        await _createChargerPin(
+          color: scheme.secondary,
+          surface: scheme.surface,
+          selected: false,
+        ),
+      );
+
+      await controller.addImage(
+        'chargehub_charger_selected',
+        await _createChargerPin(
+          color: scheme.primary,
+          surface: scheme.surface,
+          selected: true,
+        ),
+      );
+
+      await controller.addImage(
+        'chargehub_location',
+        await _createLocationMarker(
+          primary: scheme.primary,
+          surface: scheme.surface,
+        ),
+      );
+    }
 
     // Current location
     final position = _currentPosition;
@@ -253,10 +353,7 @@ class _StationsMapPageState extends State<StationsMapPage> {
     if (position != null) {
       await controller.addSymbol(
         SymbolOptions(
-          geometry: LatLng(
-            position.latitude,
-            position.longitude,
-          ),
+          geometry: LatLng(position.latitude, position.longitude),
           iconImage: 'chargehub_location',
           iconSize: 0.65,
           zIndex: 1000,
@@ -269,39 +366,41 @@ class _StationsMapPageState extends State<StationsMapPage> {
     final data = <Map<String, dynamic>>[];
 
     for (final station in widget.stations) {
-      final selected =
-          widget.selectedStation?.id == station.id;
+      final selected = widget.selectedStation?.id == station.id;
 
       options.add(
         SymbolOptions(
-          geometry: LatLng(
-            station.latitude,
-            station.longitude,
-          ),
+          geometry: LatLng(station.latitude, station.longitude),
           iconImage: selected
               ? 'chargehub_charger_selected'
-              : 'chargehub_charger',
-          iconSize: selected ? 0.82 : 0.68,
+              : _markerImageFor(station),
+          iconSize: selected ? 0.92 : 0.72,
           zIndex: selected ? 900 : 100,
         ),
       );
 
-      data.add({
-        'stationId': station.id,
-      });
+      data.add({'stationId': station.id});
     }
 
     if (options.isEmpty) {
       return;
     }
 
-    final symbols = await controller.addSymbols(
-      options,
-      data,
-    );
+    final symbols = await controller.addSymbols(options, data);
 
     for (var i = 0; i < symbols.length; i++) {
       _symbols[symbols[i].id] = widget.stations[i];
+    }
+  }
+
+  String _markerImageFor(Station station) {
+    switch (station.operationalStatus) {
+      case StationOperationalStatus.operational:
+        return 'chargehub_charger_operational';
+      case StationOperationalStatus.unavailable:
+        return 'chargehub_charger_unavailable';
+      case StationOperationalStatus.unknown:
+        return 'chargehub_charger_unknown';
     }
   }
 
@@ -328,10 +427,7 @@ class _StationsMapPageState extends State<StationsMapPage> {
     await controller.animateCamera(
       CameraUpdate.newCameraPosition(
         CameraPosition(
-          target: LatLng(
-            station.latitude,
-            station.longitude,
-          ),
+          target: LatLng(station.latitude, station.longitude),
           zoom: 15,
         ),
       ),
@@ -349,10 +445,7 @@ class _StationsMapPageState extends State<StationsMapPage> {
     await controller.animateCamera(
       CameraUpdate.newCameraPosition(
         CameraPosition(
-          target: LatLng(
-            position.latitude,
-            position.longitude,
-          ),
+          target: LatLng(position.latitude, position.longitude),
           zoom: 13,
         ),
       ),
@@ -360,12 +453,11 @@ class _StationsMapPageState extends State<StationsMapPage> {
   }
 
   Future<void> _recenter() async {
-    if (_currentPosition == null) {
-      await _loadCurrentLocation();
-      return;
-    }
+    await _loadCurrentLocation();
 
-    await _moveToCurrentLocation();
+    if (_currentPosition != null) {
+      await _moveToCurrentLocation();
+    }
   }
 
   // ─────────────────────────────────────────────
@@ -373,7 +465,7 @@ class _StationsMapPageState extends State<StationsMapPage> {
   // ─────────────────────────────────────────────
 
   Future<Uint8List> _createChargerPin({
-    required Color primary,
+    required Color color,
     required Color surface,
     required bool selected,
   }) async {
@@ -384,14 +476,18 @@ class _StationsMapPageState extends State<StationsMapPage> {
 
     final center = const Offset(60, 43);
 
-    final paint = Paint()
-      ..isAntiAlias = true;
+    final paint = Paint()..isAntiAlias = true;
 
     if (selected) {
-      paint.color = primary.withValues(alpha: 0.18);
-      canvas.drawCircle(center, 44, paint);
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5
+        ..color = color.withValues(alpha: 0.24);
+      canvas.drawCircle(center, 46, paint);
 
-      paint.color = primary.withValues(alpha: 0.08);
+      paint
+        ..strokeWidth = 3
+        ..color = color.withValues(alpha: 0.10);
       canvas.drawCircle(center, 55, paint);
     }
 
@@ -403,28 +499,53 @@ class _StationsMapPageState extends State<StationsMapPage> {
       ..cubicTo(97, 60, 72, 74, 60, 91)
       ..close();
 
-    paint.color = primary;
+    canvas.drawShadow(pin, Colors.black.withValues(alpha: 0.32), 7, true);
+
+    paint
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5
+      ..color = surface;
     canvas.drawPath(pin, paint);
 
-    paint.color = surface;
+    paint
+      ..style = PaintingStyle.fill
+      ..shader = ui.Gradient.linear(
+        const Offset(30, 10),
+        const Offset(88, 78),
+        [
+          Color.lerp(color, Colors.white, 0.18)!,
+          Color.lerp(color, Colors.black, 0.12)!,
+        ],
+      );
+    canvas.drawPath(pin, paint);
+    paint.shader = null;
+
+    paint
+      ..style = PaintingStyle.fill
+      ..color = surface;
+    canvas.drawCircle(center, 26, paint);
+
+    paint
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = color.withValues(alpha: 0.20);
     canvas.drawCircle(center, 26, paint);
 
     final bolt = Path()
-      ..moveTo(63, 18)
-      ..lineTo(42, 47)
-      ..lineTo(56, 47)
-      ..lineTo(49, 70)
-      ..lineTo(78, 36)
-      ..lineTo(64, 36)
+      ..moveTo(63, 20)
+      ..lineTo(45, 46)
+      ..lineTo(57, 46)
+      ..lineTo(52, 66)
+      ..lineTo(75, 37)
+      ..lineTo(63, 37)
       ..close();
 
-    paint.color = primary;
+    paint
+      ..style = PaintingStyle.fill
+      ..color = color;
     canvas.drawPath(bolt, paint);
 
-    return _pictureToBytes(
-      recorder.endRecording(),
-      size,
-    );
+    return _pictureToBytes(recorder.endRecording(), size);
   }
 
   // ─────────────────────────────────────────────
@@ -442,8 +563,7 @@ class _StationsMapPageState extends State<StationsMapPage> {
 
     const center = Offset(60, 60);
 
-    final paint = Paint()
-      ..isAntiAlias = true;
+    final paint = Paint()..isAntiAlias = true;
 
     paint.color = primary.withValues(alpha: 0.13);
     canvas.drawCircle(center, 50, paint);
@@ -467,24 +587,13 @@ class _StationsMapPageState extends State<StationsMapPage> {
 
     canvas.drawCircle(center, 8, paint);
 
-    return _pictureToBytes(
-      recorder.endRecording(),
-      size,
-    );
+    return _pictureToBytes(recorder.endRecording(), size);
   }
 
-  Future<Uint8List> _pictureToBytes(
-      ui.Picture picture,
-      double size,
-      ) async {
-    final image = await picture.toImage(
-      size.toInt(),
-      size.toInt(),
-    );
+  Future<Uint8List> _pictureToBytes(ui.Picture picture, double size) async {
+    final image = await picture.toImage(size.toInt(), size.toInt());
 
-    final bytes = await image.toByteData(
-      format: ui.ImageByteFormat.png,
-    );
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
 
     return bytes!.buffer.asUint8List();
   }
@@ -495,21 +604,18 @@ class _StationsMapPageState extends State<StationsMapPage> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme =
-        Theme.of(context).colorScheme;
+    final scheme = Theme.of(context).colorScheme;
 
     return Stack(
       children: [
         MapLibreMap(
           key: ValueKey(_mapKey),
           styleString: _mapStyleUrl,
-          initialCameraPosition: CameraPosition(
-            target: _mapCenter,
-            zoom: 12.8,
-          ),
+          initialCameraPosition: CameraPosition(target: _mapCenter, zoom: 12.8),
           myLocationEnabled: false,
-          myLocationTrackingMode:
-          MyLocationTrackingMode.none,
+          myLocationTrackingMode: MyLocationTrackingMode.none,
+          attributionButtonPosition: AttributionButtonPosition.topRight,
+          attributionButtonMargins: const math.Point<num>(-1000, -1000),
           compassEnabled: false,
           rotateGesturesEnabled: false,
           tiltGesturesEnabled: false,
@@ -517,12 +623,30 @@ class _StationsMapPageState extends State<StationsMapPage> {
           onStyleLoadedCallback: _onStyleLoaded,
         ),
 
+        Positioned.fill(
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    scheme.primary.withValues(alpha: 0.16),
+                    scheme.secondary.withValues(alpha: 0.07),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+
         Positioned(
           left: 12,
           top: 12,
           child: _MapBadge(
-            text:
-            '${widget.stations.length} chargers',
+            icon: Icons.ev_station_rounded,
+            text: '${widget.stations.length} chargers',
           ),
         ),
 
@@ -536,14 +660,63 @@ class _StationsMapPageState extends State<StationsMapPage> {
             ),
           ),
 
+        if (_showLocationPrompt ||
+            (_currentPosition == null && !_locationLoading))
+          Positioned(
+            left: 12,
+            right: 12,
+            top: 56,
+            child: Material(
+              color: scheme.surfaceContainer,
+              elevation: 4,
+              shadowColor: scheme.shadow.withValues(alpha: 0.22),
+              borderRadius: BorderRadius.circular(16),
+              child: InkWell(
+                onTap: _enableLocation,
+                borderRadius: BorderRadius.circular(16),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.location_off_rounded,
+                        color: scheme.primary,
+                        size: 21,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Turn on location to center the map on you.',
+                          style: TextStyle(
+                            color: scheme.onSurface,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: _enableLocation,
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
+                        child: const Text('Turn on'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
         Positioned(
           right: 12,
           bottom: 12,
           child: Material(
             color: scheme.surfaceContainer,
             elevation: 4,
-            shadowColor:
-            scheme.shadow.withValues(alpha: 0.25),
+            shadowColor: scheme.shadow.withValues(alpha: 0.25),
             shape: const CircleBorder(),
             child: InkWell(
               customBorder: const CircleBorder(),
@@ -566,9 +739,8 @@ class _StationsMapPageState extends State<StationsMapPage> {
 
   @override
   void dispose() {
-    _mapController?.onSymbolTapped.remove(
-      _onSymbolTapped,
-    );
+    WidgetsBinding.instance.removeObserver(this);
+    _mapController?.onSymbolTapped.remove(_onSymbolTapped);
     _mapController?.dispose();
     super.dispose();
   }
@@ -579,54 +751,38 @@ class _StationsMapPageState extends State<StationsMapPage> {
 // ================================================================
 
 class _MapBadge extends StatelessWidget {
-  const _MapBadge({
-    required this.text,
-    this.icon,
-  });
+  const _MapBadge({required this.text, this.icon});
 
   final String text;
   final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
-    final scheme =
-        Theme.of(context).colorScheme;
+    final scheme = Theme.of(context).colorScheme;
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainer.withValues(
-          alpha: 0.94,
-        ),
+        color: scheme.surfaceContainer.withValues(alpha: 0.94),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: scheme.outlineVariant.withValues(
-            alpha: 0.45,
-          ),
+          color: scheme.outlineVariant.withValues(alpha: 0.45),
+          width: 1.25,
         ),
         boxShadow: [
           BoxShadow(
-            color: scheme.shadow.withValues(
-              alpha: 0.15,
-            ),
+            color: scheme.shadow.withValues(alpha: 0.15),
             blurRadius: 8,
             offset: const Offset(0, 3),
           ),
         ],
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 11,
-          vertical: 7,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (icon != null) ...[
-              Icon(
-                icon,
-                size: 13,
-                color: scheme.primary,
-              ),
+              Icon(icon, size: 13, color: scheme.primary),
               const SizedBox(width: 5),
             ],
             Text(

@@ -10,6 +10,8 @@ class OcmDataSource {
 
   final http.Client _client;
 
+  static const _requestTimeout = Duration(seconds: 12);
+
   String get _apiKey => dotenv.env['OCM_API_KEY'] ?? '';
 
   Future<List<OcmStationModel>> getNearbyStations({
@@ -46,7 +48,7 @@ class OcmDataSource {
       headers: const {
         'User-Agent': 'ChargeHub/1.0',
       },
-    );
+    ).timeout(_requestTimeout);
 
     print('Status Code: ${response.statusCode}');
 
