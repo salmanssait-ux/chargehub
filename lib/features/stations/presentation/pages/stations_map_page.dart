@@ -1,9 +1,9 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
@@ -34,43 +34,47 @@ class _StationsMapPageState extends State<StationsMapPage>
   bool _mapReady = false;
   bool _locationLoading = true;
   bool _imagesRegistered = false;
-  bool _showLocationPrompt = true;
+  bool _stationLayersRegistered = false;
+  bool _updatingAccuracyCircle = false;
+  bool _markerRefreshInProgress = false;
+  bool _markerRefreshRequested = false;
+  bool _showLocationPrompt = false;
   bool _locationServiceDisabled = false;
+  bool _locationPermissionDeniedForever = false;
+  int? _mapThemeSignature;
+  CameraPosition? _cameraBeforeStyleChange;
+  String _locationPromptMessage =
+      'Location is unavailable. Check your GPS signal and try again.';
 
-  final Map<String, Station> _symbols = {};
+  final Map<String, Station> _stationsById = {};
+  Circle? _accuracyCircle;
 
   static const _fallbackLocation = LatLng(19.0760, 72.8777);
+  static const _stationSourceId = 'chargehub-station-source';
+  static const _stationLayerId = 'chargehub-stations';
+  static const _clusterLayerId = 'chargehub-station-clusters';
+  static const _clusterCountLayerId = 'chargehub-station-cluster-count';
 
   // ─────────────────────────────────────────────
   // Map style
   // ─────────────────────────────────────────────
 
-  String get _mapStyleUrl {
-    final apiKey = dotenv.env['STADIA_MAPS_API_KEY']?.trim();
-    final isDark = Theme.of(context).colorScheme.brightness == Brightness.dark;
+  // The configured Stadia key is accepted for style metadata but is not
+  // authorized for its OpenMapTiles vector tiles, which produces HTTP 401.
+  // These existing public OSM-compatible styles include unauthenticated
+  // OpenMapTiles sources that have been verified to load on Android.
+  static const _lightMapStyleUrl =
+      'https://tiles.openfreemap.org/styles/liberty';
+  static const _darkMapStyleUrl = 'https://tiles.openfreemap.org/styles/fiord';
 
-    if (apiKey == null || apiKey.isEmpty) {
-      return 'https://tiles.openfreemap.org/styles/liberty';
-    }
+  String _activeMapStyleUrl = _lightMapStyleUrl;
 
-    final style = isDark ? 'alidade_smooth_dark' : 'alidade_smooth';
+  String get _mapStyleUrl => _styleFor(Theme.of(context).colorScheme);
 
-    final tileUrl =
-        'https://tiles.stadiamaps.com/styles/'
-        '$style.json'
-        '?api_key=$apiKey';
-
-    return tileUrl;
-  }
-
-  String get _mapKey {
-    final scheme = Theme.of(context).colorScheme;
-
-    return [
-      scheme.brightness.name,
-      scheme.primary.toARGB32(),
-      scheme.surface.toARGB32(),
-    ].join('_');
+  String _styleFor(ColorScheme scheme) {
+    return scheme.brightness == Brightness.dark
+        ? _darkMapStyleUrl
+        : _lightMapStyleUrl;
   }
 
   LatLng get _mapCenter {
@@ -91,14 +95,57 @@ class _StationsMapPageState extends State<StationsMapPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    MapLibreMap.useHybridComposition = true;
+    // Hybrid composition can place the Android platform view above Flutter's
+    // Drawer and AppBar. The plugin's texture composition is the supported
+    // default and keeps Flutter controls interactive above the map.
+    MapLibreMap.useHybridComposition = false;
     _loadCurrentLocation();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    final scheme = Theme.of(context).colorScheme;
+    final signature = scheme.brightness.index;
+
+    final styleUrl = _styleFor(scheme);
+    if (_mapThemeSignature == signature) {
+      return;
+    }
+    _mapThemeSignature = signature;
+
+    if (_mapReady) {
+      // Keep the native map view mounted while applying the current app
+      // palette. Replacing the platform view on theme changes can break its
+      // semantics tree.
+      if (styleUrl != _activeMapStyleUrl) {
+        unawaited(_setMapStyle(styleUrl));
+      }
+    }
+  }
+
+  Future<void> _setMapStyle(String styleUrl) async {
+    final controller = _mapController;
+    if (controller == null) return;
+
+    _cameraBeforeStyleChange = controller.cameraPosition;
+    _mapReady = false;
+    _imagesRegistered = false;
+    _stationLayersRegistered = false;
+    _accuracyCircle = null;
+    _activeMapStyleUrl = styleUrl;
+    await controller.setStyle(styleUrl);
   }
 
   Future<void> _loadCurrentLocation() async {
     try {
       if (!await Geolocator.isLocationServiceEnabled()) {
-        _finishLocationLoading(showPrompt: true, serviceDisabled: true);
+        _finishLocationLoading(
+          showPrompt: true,
+          serviceDisabled: true,
+          message: 'Turn on location services to center the map on you.',
+        );
         return;
       }
 
@@ -110,7 +157,14 @@ class _StationsMapPageState extends State<StationsMapPage>
 
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        _finishLocationLoading(showPrompt: true);
+        _finishLocationLoading(
+          showPrompt: true,
+          permissionDeniedForever:
+              permission == LocationPermission.deniedForever,
+          message: permission == LocationPermission.deniedForever
+              ? 'Allow location access in app settings to center the map.'
+              : 'Allow location access to center the map on you.',
+        );
         return;
       }
 
@@ -128,6 +182,7 @@ class _StationsMapPageState extends State<StationsMapPage>
         _locationLoading = false;
         _showLocationPrompt = false;
         _locationServiceDisabled = false;
+        _locationPermissionDeniedForever = false;
       });
 
       if (_mapReady) {
@@ -135,13 +190,21 @@ class _StationsMapPageState extends State<StationsMapPage>
         await _refreshMarkers();
       }
     } catch (_) {
-      _finishLocationLoading(showPrompt: true);
+      // Location services can be enabled while a fix is temporarily
+      // unavailable, especially indoors or when the device has no GPS lock.
+      _finishLocationLoading(
+        showPrompt: true,
+        message:
+            'Location is unavailable. Check your GPS signal and try again.',
+      );
     }
   }
 
   void _finishLocationLoading({
     bool showPrompt = false,
     bool serviceDisabled = false,
+    bool permissionDeniedForever = false,
+    String? message,
   }) {
     if (!mounted) return;
 
@@ -149,12 +212,18 @@ class _StationsMapPageState extends State<StationsMapPage>
       _locationLoading = false;
       _showLocationPrompt = showPrompt;
       _locationServiceDisabled = serviceDisabled;
+      _locationPermissionDeniedForever = permissionDeniedForever;
+      if (message != null) {
+        _locationPromptMessage = message;
+      }
     });
   }
 
   Future<void> _enableLocation() async {
     if (_locationServiceDisabled) {
       await Geolocator.openLocationSettings();
+    } else if (_locationPermissionDeniedForever) {
+      await Geolocator.openAppSettings();
     } else {
       final permission = await Geolocator.requestPermission();
 
@@ -179,77 +248,82 @@ class _StationsMapPageState extends State<StationsMapPage>
 
   void _onMapCreated(MapLibreMapController controller) {
     _mapController = controller;
-
-    controller.onSymbolTapped.add(_onSymbolTapped);
+    controller.onFeatureTapped.add(_onFeatureTapped);
   }
 
   Future<void> _onStyleLoaded() async {
     if (!mounted) return;
 
-    _mapReady = true;
+    _mapReady = false;
+    _activeMapStyleUrl = _mapStyleUrl;
     _imagesRegistered = false;
-
-    await _tintRoadLayers();
+    _stationLayersRegistered = false;
+    await _applyMapPalette();
+    _mapReady = true;
     await _refreshMarkers();
 
-    // The initial camera position is only used while the map is created.
-    // Location may have resolved before the style finished loading, so move
-    // the camera explicitly once the map can accept camera updates.
-    await _moveToCurrentLocation();
-
-    final selectedStation = widget.selectedStation;
-    if (selectedStation != null) {
-      await _moveToStation(selectedStation);
+    final previousCamera = _cameraBeforeStyleChange;
+    _cameraBeforeStyleChange = null;
+    if (previousCamera != null) {
+      await _mapController?.moveCamera(
+        CameraUpdate.newCameraPosition(previousCamera),
+      );
+    } else {
+      // Location may have resolved before the style finished loading.
+      await _moveToCurrentLocation();
+      final selectedStation = widget.selectedStation;
+      if (selectedStation != null) {
+        await _moveToStation(selectedStation);
+      }
     }
   }
 
-  Future<void> _tintRoadLayers() async {
+  Future<void> _applyMapPalette() async {
     final controller = _mapController;
     if (controller == null) return;
 
-    final scheme = Theme.of(context).colorScheme;
-    final minorRoadColor = Color.lerp(
-      scheme.surface,
-      scheme.primary,
-      scheme.brightness == Brightness.dark ? 0.28 : 0.24,
-    )!;
-    final majorRoadColor = Color.lerp(
-      scheme.surface,
-      scheme.primary,
-      scheme.brightness == Brightness.dark ? 0.46 : 0.40,
-    )!;
-    final layerIds = await controller.getLayerIds();
+    final isDark = Theme.of(context).colorScheme.brightness == Brightness.dark;
+    final layerIds = (await controller.getLayerIds())
+        .map((id) => id.toString())
+        .toSet();
 
-    for (final layerId in layerIds) {
-      final id = layerId.toString().toLowerCase();
-      if (!id.contains('road') &&
-          !id.contains('street') &&
-          !id.contains('highway') &&
-          !id.contains('motorway') &&
-          !id.contains('transport')) {
-        continue;
+    final fills = <String, FillLayerProperties>{
+      'water': FillLayerProperties(fillColor: isDark ? '#273E54' : '#B9D9EB'),
+      'landuse_residential': FillLayerProperties(
+        fillColor: isDark ? '#2A3440' : '#EEF2F3',
+      ),
+      'park': FillLayerProperties(
+        fillColor: isDark ? '#30463E' : '#DCEBD8',
+        fillOpacity: isDark ? 0.62 : 0.72,
+      ),
+      'landcover_wood': FillLayerProperties(
+        fillColor: isDark ? '#34483F' : '#D6E6D1',
+        fillOpacity: isDark ? 0.52 : 0.42,
+      ),
+    };
+    for (final entry in fills.entries) {
+      if (layerIds.contains(entry.key)) {
+        await controller.setLayerProperties(entry.key, entry.value);
       }
+    }
 
-      final isMajorRoad =
-          id.contains('motorway') ||
-          id.contains('trunk') ||
-          id.contains('highway') ||
-          id.contains('primary');
-
+    final parkOutline = layerIds.firstWhere(
+      (id) => id == 'park_outline',
+      orElse: () => '',
+    );
+    if (parkOutline.isNotEmpty) {
       await controller.setLayerProperties(
-        layerId.toString(),
+        parkOutline,
         LineLayerProperties(
-          lineColor: _colorHex(isMajorRoad ? majorRoadColor : minorRoadColor),
-          lineWidth: 0.7,
-          lineOpacity: isMajorRoad ? 0.95 : 0.84,
+          lineColor: isDark ? '#405B4F' : '#C9DFC3',
+          lineOpacity: 0.8,
         ),
       );
     }
-  }
 
-  String _colorHex(Color color) {
-    final value = color.toARGB32().toRadixString(16).padLeft(8, '0');
-    return '#${value.substring(2)}';
+    for (final layerId in layerIds.where((id) => id.startsWith('poi_'))) {
+      await controller.setLayerVisibility(layerId, false);
+    }
   }
 
   @override
@@ -258,14 +332,15 @@ class _StationsMapPageState extends State<StationsMapPage>
 
     final selectionChanged =
         oldWidget.selectedStation?.id != widget.selectedStation?.id;
-    final stationsChanged = oldWidget.stations.length != widget.stations.length;
+    final stationsChanged = _stationMarkerDataChanged(
+      oldWidget.stations,
+      widget.stations,
+    );
 
-    if (selectionChanged || stationsChanged) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _mapReady) {
-          _updateMapForWidgetChange(moveToSelectedStation: selectionChanged);
-        }
-      });
+    if ((selectionChanged || stationsChanged) && _mapReady) {
+      unawaited(
+        _updateMapForWidgetChange(moveToSelectedStation: selectionChanged),
+      );
     }
   }
 
@@ -280,11 +355,45 @@ class _StationsMapPageState extends State<StationsMapPage>
     }
   }
 
+  bool _stationMarkerDataChanged(
+    List<Station> previous,
+    List<Station> current,
+  ) {
+    if (previous.length != current.length) return true;
+    for (var i = 0; i < previous.length; i++) {
+      final a = previous[i];
+      final b = current[i];
+      if (a.id != b.id ||
+          a.latitude != b.latitude ||
+          a.longitude != b.longitude ||
+          a.operationalStatus != b.operationalStatus) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // ─────────────────────────────────────────────
   // Markers
   // ─────────────────────────────────────────────
 
   Future<void> _refreshMarkers() async {
+    if (_markerRefreshInProgress) {
+      _markerRefreshRequested = true;
+      return;
+    }
+    _markerRefreshInProgress = true;
+    try {
+      do {
+        _markerRefreshRequested = false;
+        await _refreshMarkersNow();
+      } while (_markerRefreshRequested);
+    } finally {
+      _markerRefreshInProgress = false;
+    }
+  }
+
+  Future<void> _refreshMarkersNow() async {
     final controller = _mapController;
 
     if (controller == null || !_mapReady) {
@@ -293,19 +402,13 @@ class _StationsMapPageState extends State<StationsMapPage>
 
     final scheme = Theme.of(context).colorScheme;
 
-    try {
-      await controller.clearSymbols();
-    } catch (_) {}
-
-    _symbols.clear();
-
     if (!_imagesRegistered) {
       _imagesRegistered = true;
 
       await controller.addImage(
         'chargehub_charger_operational',
         await _createChargerPin(
-          color: scheme.primary,
+          color: const Color(0xFF1677D2),
           surface: scheme.surface,
           selected: false,
         ),
@@ -314,7 +417,7 @@ class _StationsMapPageState extends State<StationsMapPage>
       await controller.addImage(
         'chargehub_charger_unavailable',
         await _createChargerPin(
-          color: scheme.error,
+          color: const Color(0xFF65758B),
           surface: scheme.surface,
           selected: false,
         ),
@@ -323,7 +426,7 @@ class _StationsMapPageState extends State<StationsMapPage>
       await controller.addImage(
         'chargehub_charger_unknown',
         await _createChargerPin(
-          color: scheme.secondary,
+          color: const Color(0xFF4B91D1),
           surface: scheme.surface,
           selected: false,
         ),
@@ -332,7 +435,7 @@ class _StationsMapPageState extends State<StationsMapPage>
       await controller.addImage(
         'chargehub_charger_selected',
         await _createChargerPin(
-          color: scheme.primary,
+          color: const Color(0xFF1677D2),
           surface: scheme.surface,
           selected: true,
         ),
@@ -340,57 +443,130 @@ class _StationsMapPageState extends State<StationsMapPage>
 
       await controller.addImage(
         'chargehub_location',
-        await _createLocationMarker(
-          primary: scheme.primary,
-          surface: scheme.surface,
-        ),
+        await _createLocationMarker(surface: scheme.surface),
       );
     }
 
-    // Current location
     final position = _currentPosition;
-
     if (position != null) {
+      await controller.clearSymbols();
       await controller.addSymbol(
         SymbolOptions(
           geometry: LatLng(position.latitude, position.longitude),
           iconImage: 'chargehub_location',
-          iconSize: 0.65,
+          iconSize: 0.62,
           zIndex: 1000,
         ),
       );
+      await _updateAccuracyCircle();
+    } else {
+      await controller.clearSymbols();
+      if (_accuracyCircle != null) {
+        await controller.removeCircle(_accuracyCircle!);
+        _accuracyCircle = null;
+      }
     }
 
-    // Charging stations
-    final options = <SymbolOptions>[];
-    final data = <Map<String, dynamic>>[];
-
-    for (final station in widget.stations) {
-      final selected = widget.selectedStation?.id == station.id;
-
-      options.add(
-        SymbolOptions(
-          geometry: LatLng(station.latitude, station.longitude),
-          iconImage: selected
-              ? 'chargehub_charger_selected'
-              : _markerImageFor(station),
-          iconSize: selected ? 0.92 : 0.72,
-          zIndex: selected ? 900 : 100,
-        ),
+    await _registerStationLayers(controller);
+    _stationsById
+      ..clear()
+      ..addEntries(
+        widget.stations.map((station) => MapEntry(station.id, station)),
       );
+    await controller.setGeoJsonSource(
+      _stationSourceId,
+      _stationFeatureCollection(),
+    );
+  }
 
-      data.add({'stationId': station.id});
-    }
+  Map<String, dynamic> _stationFeatureCollection() {
+    return {
+      'type': 'FeatureCollection',
+      'features': widget.stations.map((station) {
+        final selected = widget.selectedStation?.id == station.id;
+        return {
+          'type': 'Feature',
+          'id': station.id,
+          'properties': {
+            'stationId': station.id,
+            'icon': selected
+                ? 'chargehub_charger_selected'
+                : _markerImageFor(station),
+            'selected': selected,
+          },
+          'geometry': {
+            'type': 'Point',
+            'coordinates': [station.longitude, station.latitude],
+          },
+        };
+      }).toList(),
+    };
+  }
 
-    if (options.isEmpty) {
-      return;
-    }
-
-    final symbols = await controller.addSymbols(options, data);
-
-    for (var i = 0; i < symbols.length; i++) {
-      _symbols[symbols[i].id] = widget.stations[i];
-    }
+  Future<void> _registerStationLayers(MapLibreMapController controller) async {
+    if (_stationLayersRegistered) return;
+    await controller.addSource(
+      _stationSourceId,
+      GeojsonSourceProperties(
+        data: _stationFeatureCollection(),
+        cluster: true,
+        clusterRadius: 44,
+        clusterMaxZoom: 13,
+      ),
+    );
+    await controller.addLayer(
+      _stationSourceId,
+      _clusterLayerId,
+      const CircleLayerProperties(
+        circleColor: '#1677D2',
+        circleRadius: [
+          'step',
+          ['get', 'point_count'],
+          18,
+          10,
+          21,
+          30,
+          24,
+        ],
+        circleStrokeColor: '#FFFFFF',
+        circleStrokeWidth: 2,
+      ),
+      filter: ['has', 'point_count'],
+    );
+    await controller.addLayer(
+      _stationSourceId,
+      _clusterCountLayerId,
+      SymbolLayerProperties(
+        textField: ['get', 'point_count_abbreviated'],
+        textSize: 12,
+        textColor: '#FFFFFF',
+        textFont: ['Noto Sans Bold'],
+        textAllowOverlap: true,
+        textIgnorePlacement: true,
+      ),
+      filter: ['has', 'point_count'],
+    );
+    await controller.addLayer(
+      _stationSourceId,
+      _stationLayerId,
+      const SymbolLayerProperties(
+        iconImage: ['get', 'icon'],
+        iconSize: [
+          'case',
+          ['get', 'selected'],
+          0.56,
+          0.43,
+        ],
+        iconAnchor: 'bottom',
+        iconAllowOverlap: true,
+        iconIgnorePlacement: true,
+      ),
+      filter: [
+        '!',
+        ['has', 'point_count'],
+      ],
+    );
+    _stationLayersRegistered = true;
   }
 
   String _markerImageFor(Station station) {
@@ -404,15 +580,35 @@ class _StationsMapPageState extends State<StationsMapPage>
     }
   }
 
-  void _onSymbolTapped(Symbol symbol) {
-    final station = _symbols[symbol.id];
-
-    if (station == null) {
+  Future<void> _onFeatureTapped(
+    math.Point<double> point,
+    LatLng coordinates,
+    String id,
+    String layerId,
+    Annotation? annotation,
+  ) async {
+    if (layerId == _clusterLayerId || layerId == _clusterCountLayerId) {
+      final controller = _mapController;
+      final camera = controller?.cameraPosition;
+      if (controller != null && camera != null) {
+        await controller.animateCamera(
+          CameraUpdate.newCameraPosition(
+            CameraPosition(
+              target: coordinates,
+              zoom: (camera.zoom + 2).clamp(0, 18),
+              tilt: camera.tilt,
+              bearing: camera.bearing,
+            ),
+          ),
+        );
+      }
       return;
     }
 
+    final station = _stationsById[id];
+    if (layerId != _stationLayerId || station == null) return;
     widget.onStationSelected(station);
-    _moveToStation(station);
+    await _moveToStation(station);
   }
 
   // ─────────────────────────────────────────────
@@ -453,11 +649,14 @@ class _StationsMapPageState extends State<StationsMapPage>
   }
 
   Future<void> _recenter() async {
-    await _loadCurrentLocation();
-
+    // Use the last known fix immediately so the control responds without
+    // waiting for a new GPS reading. _loadCurrentLocation then refreshes the
+    // position and moves the camera again when a newer fix is available.
     if (_currentPosition != null) {
       await _moveToCurrentLocation();
     }
+
+    await _loadCurrentLocation();
   }
 
   // ─────────────────────────────────────────────
@@ -469,49 +668,45 @@ class _StationsMapPageState extends State<StationsMapPage>
     required Color surface,
     required bool selected,
   }) async {
-    const size = 120.0;
+    const size = 144.0;
+    const scale = size / 120;
 
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
+    canvas.scale(scale);
 
-    final center = const Offset(60, 43);
+    const center = Offset(60, 54);
 
     final paint = Paint()..isAntiAlias = true;
 
     if (selected) {
       paint
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 5
-        ..color = color.withValues(alpha: 0.24);
-      canvas.drawCircle(center, 46, paint);
-
-      paint
-        ..strokeWidth = 3
-        ..color = color.withValues(alpha: 0.10);
-      canvas.drawCircle(center, 55, paint);
+        ..style = PaintingStyle.fill
+        ..color = color.withValues(alpha: 0.12);
+      canvas.drawCircle(center, 51, paint);
     }
 
     final pin = Path()
-      ..moveTo(60, 91)
-      ..cubicTo(48, 74, 23, 60, 23, 39)
-      ..cubicTo(23, 17, 40, 3, 60, 3)
-      ..cubicTo(80, 3, 97, 17, 97, 39)
-      ..cubicTo(97, 60, 72, 74, 60, 91)
+      ..moveTo(60, 116)
+      ..cubicTo(47, 96, 23, 77, 23, 53)
+      ..cubicTo(23, 30, 40, 15, 60, 15)
+      ..cubicTo(80, 15, 97, 30, 97, 53)
+      ..cubicTo(97, 77, 73, 96, 60, 116)
       ..close();
 
-    canvas.drawShadow(pin, Colors.black.withValues(alpha: 0.32), 7, true);
+    canvas.drawShadow(pin, Colors.black.withValues(alpha: 0.18), 4, true);
 
     paint
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 5
+      ..strokeWidth = 4
       ..color = surface;
     canvas.drawPath(pin, paint);
 
     paint
       ..style = PaintingStyle.fill
       ..shader = ui.Gradient.linear(
-        const Offset(30, 10),
-        const Offset(88, 78),
+        const Offset(30, 20),
+        const Offset(88, 96),
         [
           Color.lerp(color, Colors.white, 0.18)!,
           Color.lerp(color, Colors.black, 0.12)!,
@@ -523,21 +718,21 @@ class _StationsMapPageState extends State<StationsMapPage>
     paint
       ..style = PaintingStyle.fill
       ..color = surface;
-    canvas.drawCircle(center, 26, paint);
+    canvas.drawCircle(center, 25, paint);
 
     paint
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
+      ..strokeWidth = 1.5
       ..color = color.withValues(alpha: 0.20);
-    canvas.drawCircle(center, 26, paint);
+    canvas.drawCircle(center, 25, paint);
 
     final bolt = Path()
-      ..moveTo(63, 20)
-      ..lineTo(45, 46)
-      ..lineTo(57, 46)
-      ..lineTo(52, 66)
-      ..lineTo(75, 37)
-      ..lineTo(63, 37)
+      ..moveTo(63, 31)
+      ..lineTo(45, 57)
+      ..lineTo(57, 57)
+      ..lineTo(52, 77)
+      ..lineTo(75, 48)
+      ..lineTo(63, 48)
       ..close();
 
     paint
@@ -552,10 +747,7 @@ class _StationsMapPageState extends State<StationsMapPage>
   // Location marker
   // ─────────────────────────────────────────────
 
-  Future<Uint8List> _createLocationMarker({
-    required Color primary,
-    required Color surface,
-  }) async {
+  Future<Uint8List> _createLocationMarker({required Color surface}) async {
     const size = 120.0;
 
     final recorder = ui.PictureRecorder();
@@ -565,17 +757,11 @@ class _StationsMapPageState extends State<StationsMapPage>
 
     final paint = Paint()..isAntiAlias = true;
 
-    paint.color = primary.withValues(alpha: 0.13);
-    canvas.drawCircle(center, 50, paint);
-
-    paint.color = primary.withValues(alpha: 0.07);
-    canvas.drawCircle(center, 61, paint);
-
     paint.color = surface;
     canvas.drawCircle(center, 24, paint);
 
     paint
-      ..color = primary
+      ..color = const Color(0xFF1677D2)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 6;
 
@@ -583,11 +769,49 @@ class _StationsMapPageState extends State<StationsMapPage>
 
     paint
       ..style = PaintingStyle.fill
-      ..color = primary;
+      ..color = const Color(0xFF1677D2);
 
     canvas.drawCircle(center, 8, paint);
 
     return _pictureToBytes(recorder.endRecording(), size);
+  }
+
+  Future<void> _updateAccuracyCircle() async {
+    final controller = _mapController;
+    final position = _currentPosition;
+    if (controller == null ||
+        position == null ||
+        !_mapReady ||
+        _updatingAccuracyCircle) {
+      return;
+    }
+
+    _updatingAccuracyCircle = true;
+    try {
+      final metersPerPixel = await controller.getMetersPerPixelAtLatitude(
+        position.latitude,
+      );
+      final radius = (position.accuracy / metersPerPixel)
+          .clamp(8.0, 96.0)
+          .toDouble();
+      final options = CircleOptions(
+        geometry: LatLng(position.latitude, position.longitude),
+        circleRadius: radius,
+        circleColor: '#1677D2',
+        circleOpacity: 0.12,
+        circleStrokeColor: '#1677D2',
+        circleStrokeWidth: 1.5,
+        circleStrokeOpacity: 0.4,
+      );
+      final currentCircle = _accuracyCircle;
+      if (currentCircle == null) {
+        _accuracyCircle = await controller.addCircle(options);
+      } else {
+        await controller.updateCircle(currentCircle, options);
+      }
+    } finally {
+      _updatingAccuracyCircle = false;
+    }
   }
 
   Future<Uint8List> _pictureToBytes(ui.Picture picture, double size) async {
@@ -609,44 +833,29 @@ class _StationsMapPageState extends State<StationsMapPage>
     return Stack(
       children: [
         MapLibreMap(
-          key: ValueKey(_mapKey),
           styleString: _mapStyleUrl,
           initialCameraPosition: CameraPosition(target: _mapCenter, zoom: 12.8),
           myLocationEnabled: false,
           myLocationTrackingMode: MyLocationTrackingMode.none,
-          attributionButtonPosition: AttributionButtonPosition.topRight,
-          attributionButtonMargins: const math.Point<num>(-1000, -1000),
+          attributionButtonPosition: AttributionButtonPosition.bottomLeft,
+          attributionButtonMargins: const math.Point<num>(8, 56),
           compassEnabled: false,
           rotateGesturesEnabled: false,
           tiltGesturesEnabled: false,
           onMapCreated: _onMapCreated,
           onStyleLoadedCallback: _onStyleLoaded,
-        ),
-
-        Positioned.fill(
-          child: IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    scheme.primary.withValues(alpha: 0.16),
-                    scheme.secondary.withValues(alpha: 0.07),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-            ),
-          ),
+          onCameraIdle: () => unawaited(_updateAccuracyCircle()),
         ),
 
         Positioned(
           left: 12,
           top: 12,
-          child: _MapBadge(
-            icon: Icons.ev_station_rounded,
-            text: '${widget.stations.length} chargers',
+          child: Semantics(
+            label: '${widget.stations.length} charging stations on map',
+            child: _MapBadge(
+              icon: Icons.ev_station_rounded,
+              text: '${widget.stations.length} chargers',
+            ),
           ),
         ),
 
@@ -676,32 +885,46 @@ class _StationsMapPageState extends State<StationsMapPage>
                 borderRadius: BorderRadius.circular(16),
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Icon(
-                        Icons.location_off_rounded,
-                        color: scheme.primary,
-                        size: 21,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'Turn on location to center the map on you.',
-                          style: TextStyle(
-                            color: scheme.onSurface,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.location_off_rounded,
+                            color: scheme.primary,
+                            size: 21,
                           ),
-                        ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _locationPromptMessage,
+                              softWrap: true,
+                              style: TextStyle(
+                                color: scheme.onSurface,
+                                fontSize: 12,
+                                height: 1.25,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(height: 10),
                       FilledButton(
                         onPressed: _enableLocation,
+                        clipBehavior: Clip.antiAlias,
                         style: FilledButton.styleFrom(
                           visualDensity: VisualDensity.compact,
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                         ),
-                        child: const Text('Turn on'),
+                        child: Text(
+                          _locationServiceDisabled ||
+                                  _locationPermissionDeniedForever
+                              ? 'Settings'
+                              : 'Retry',
+                        ),
                       ),
                     ],
                   ),
@@ -713,21 +936,25 @@ class _StationsMapPageState extends State<StationsMapPage>
         Positioned(
           right: 12,
           bottom: 12,
-          child: Material(
-            color: scheme.surfaceContainer,
-            elevation: 4,
-            shadowColor: scheme.shadow.withValues(alpha: 0.25),
-            shape: const CircleBorder(),
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: _recenter,
-              child: SizedBox(
-                width: 48,
-                height: 48,
-                child: Icon(
-                  Icons.my_location_rounded,
-                  color: scheme.primary,
-                  size: 22,
+          child: Semantics(
+            button: true,
+            label: 'Current location',
+            child: Material(
+              color: scheme.surfaceContainer,
+              elevation: 3,
+              shadowColor: scheme.shadow.withValues(alpha: 0.22),
+              shape: const CircleBorder(),
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: _recenter,
+                child: SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: Icon(
+                    Icons.my_location_rounded,
+                    color: const Color(0xFF1677D2),
+                    size: 22,
+                  ),
                 ),
               ),
             ),
@@ -740,7 +967,7 @@ class _StationsMapPageState extends State<StationsMapPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _mapController?.onSymbolTapped.remove(_onSymbolTapped);
+    _mapController?.onFeatureTapped.remove(_onFeatureTapped);
     _mapController?.dispose();
     super.dispose();
   }

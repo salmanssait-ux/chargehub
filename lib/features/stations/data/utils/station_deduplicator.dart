@@ -11,10 +11,7 @@ class StationDeduplicator {
     final result = <Station>[];
 
     for (final station in stations) {
-      final duplicateIndex = _findDuplicateIndex(
-        result,
-        station,
-      );
+      final duplicateIndex = _findDuplicateIndex(result, station);
 
       if (duplicateIndex == -1) {
         result.add(station);
@@ -23,23 +20,15 @@ class StationDeduplicator {
 
       final existing = result[duplicateIndex];
 
-      result[duplicateIndex] = _mergeStations(
-        existing,
-        station,
-      );
+      result[duplicateIndex] = _mergeStations(existing, station);
     }
 
-    result.sort(
-      (a, b) => a.distanceKm.compareTo(b.distanceKm),
-    );
+    result.sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
 
     return result;
   }
 
-  int _findDuplicateIndex(
-    List<Station> existingStations,
-    Station candidate,
-  ) {
+  int _findDuplicateIndex(List<Station> existingStations, Station candidate) {
     for (var i = 0; i < existingStations.length; i++) {
       final existing = existingStations[i];
 
@@ -89,14 +78,11 @@ class StationDeduplicator {
       return false;
     }
 
-    final commonWords =
-        firstWords.intersection(secondWords).length;
+    final commonWords = firstWords.intersection(secondWords).length;
 
-    final smallerWordCount =
-        min(firstWords.length, secondWords.length);
+    final smallerWordCount = min(firstWords.length, secondWords.length);
 
-    return smallerWordCount >= 2 &&
-        commonWords >= 2;
+    return smallerWordCount >= 2 && commonWords >= 2;
   }
 
   bool _addressesMatch(String first, String second) {
@@ -127,78 +113,46 @@ class StationDeduplicator {
         .trim();
   }
 
-  Station _mergeStations(
-    Station first,
-    Station second,
-  ) {
-    final preferred = _preferredStation(
-      first,
-      second,
-    );
+  Station _mergeStations(Station first, Station second) {
+    final preferred = _preferredStation(first, second);
 
-    final other = identical(preferred, first)
-        ? second
-        : first;
+    final other = identical(preferred, first) ? second : first;
 
     return Station(
       id: preferred.id,
-      name: _bestName(
-        preferred.name,
-        other.name,
-      ),
-      address: _bestAddress(
-        preferred.address,
-        other.address,
-      ),
+      name: _bestName(preferred.name, other.name),
+      address: _bestAddress(preferred.address, other.address),
       latitude: preferred.latitude,
       longitude: preferred.longitude,
-      distanceKm: min(
-        first.distanceKm,
-        second.distanceKm,
-      ),
+      distanceKm: min(first.distanceKm, second.distanceKm),
       operationalStatus: _mergeOperationalStatus(
         first.operationalStatus,
         second.operationalStatus,
       ),
-      isPublic: _mergePublicStatus(
-        first.isPublic,
-        second.isPublic,
-      ),
-      connectors: _mergeConnectors(
-        first.connectors,
-        second.connectors,
-      ),
+      isPublic: _mergePublicStatus(first.isPublic, second.isPublic),
+      connectors: _mergeConnectors(first.connectors, second.connectors),
       source: preferred.source,
+      chargerCount: preferred.chargerCount ?? other.chargerCount,
+      operatorName: preferred.operatorName ?? other.operatorName,
+      notes: preferred.notes ?? other.notes,
     );
   }
 
-  Station _preferredStation(
-    Station first,
-    Station second,
-  ) {
+  Station _preferredStation(Station first, Station second) {
     if (first.source == StationSource.ocm &&
         second.source == StationSource.osm) {
-      return _hasBetterData(first, second)
-          ? first
-          : second;
+      return _hasBetterData(first, second) ? first : second;
     }
 
     if (first.source == StationSource.osm &&
         second.source == StationSource.ocm) {
-      return _hasBetterData(second, first)
-          ? second
-          : first;
+      return _hasBetterData(second, first) ? second : first;
     }
 
-    return _hasBetterData(first, second)
-        ? first
-        : second;
+    return _hasBetterData(first, second) ? first : second;
   }
 
-  bool _hasBetterData(
-    Station first,
-    Station second,
-  ) {
+  bool _hasBetterData(Station first, Station second) {
     return _dataScore(first) >= _dataScore(second);
   }
 
@@ -213,15 +167,11 @@ class StationDeduplicator {
       score += 2;
     }
 
-    if (station.connectors.any(
-      (connector) => connector.type != 'Unknown',
-    )) {
+    if (station.connectors.any((connector) => connector.type != 'Unknown')) {
       score += 2;
     }
 
-    if (station.connectors.any(
-      (connector) => connector.powerKw != null,
-    )) {
+    if (station.connectors.any((connector) => connector.powerKw != null)) {
       score += 2;
     }
 
@@ -229,8 +179,7 @@ class StationDeduplicator {
       score++;
     }
 
-    if (station.operationalStatus !=
-        StationOperationalStatus.unknown) {
+    if (station.operationalStatus != StationOperationalStatus.unknown) {
       score++;
     }
 
@@ -253,24 +202,16 @@ class StationDeduplicator {
         normalized != 'unknown address';
   }
 
-  String _bestName(
-    String first,
-    String second,
-  ) {
-    if (!_isUsefulName(first) &&
-        _isUsefulName(second)) {
+  String _bestName(String first, String second) {
+    if (!_isUsefulName(first) && _isUsefulName(second)) {
       return second;
     }
 
     return first;
   }
 
-  String _bestAddress(
-    String first,
-    String second,
-  ) {
-    if (!_isUsefulAddress(first) &&
-        _isUsefulAddress(second)) {
+  String _bestAddress(String first, String second) {
+    if (!_isUsefulAddress(first) && _isUsefulAddress(second)) {
       return second;
     }
 
@@ -294,10 +235,7 @@ class StationDeduplicator {
     return StationOperationalStatus.unknown;
   }
 
-  bool? _mergePublicStatus(
-    bool? first,
-    bool? second,
-  ) {
+  bool? _mergePublicStatus(bool? first, bool? second) {
     return first ?? second;
   }
 
@@ -307,14 +245,9 @@ class StationDeduplicator {
   ) {
     final merged = <Connector>[];
 
-    for (final connector in [
-      ...first,
-      ...second,
-    ]) {
+    for (final connector in [...first, ...second]) {
       final exists = merged.any(
-        (existing) =>
-            _normalize(existing.type) ==
-            _normalize(connector.type),
+        (existing) => _normalize(existing.type) == _normalize(connector.type),
       );
 
       if (!exists) {
@@ -341,15 +274,9 @@ class StationDeduplicator {
 
     final a =
         sin(deltaLat / 2) * sin(deltaLat / 2) +
-        cos(lat1Rad) *
-            cos(lat2Rad) *
-            sin(deltaLon / 2) *
-            sin(deltaLon / 2);
+        cos(lat1Rad) * cos(lat2Rad) * sin(deltaLon / 2) * sin(deltaLon / 2);
 
-    final c = 2 * atan2(
-      sqrt(a),
-      sqrt(1 - a),
-    );
+    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
 
     return earthRadiusMeters * c;
   }

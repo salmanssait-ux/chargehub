@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'theme_selector.dart';
 
 class ChargeHubDrawer extends StatelessWidget {
-  const ChargeHubDrawer({
-    super.key,
-  });
+  const ChargeHubDrawer({super.key, this.onAddCharger, this.onShowThemes});
+
+  final VoidCallback? onAddCharger;
+  final VoidCallback? onShowThemes;
 
   @override
   Widget build(BuildContext context) {
@@ -19,24 +19,15 @@ class ChargeHubDrawer extends StatelessWidget {
             // Header
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(
-                24,
-                28,
-                20,
-                24,
-              ),
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainer,
-              ),
+              padding: const EdgeInsets.fromLTRB(24, 28, 20, 24),
+              decoration: BoxDecoration(color: colorScheme.surfaceContainer),
               child: Row(
                 children: [
                   Container(
                     width: 52,
                     height: 52,
                     decoration: BoxDecoration(
-                      color: colorScheme.primary.withValues(
-                        alpha: 0.12,
-                      ),
+                      color: colorScheme.primary.withValues(alpha: 0.12),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
@@ -47,8 +38,7 @@ class ChargeHubDrawer extends StatelessWidget {
                   ),
                   const SizedBox(width: 14),
                   Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         'ChargeHub',
@@ -63,8 +53,7 @@ class ChargeHubDrawer extends StatelessWidget {
                         'Find. Charge. Go.',
                         style: TextStyle(
                           fontSize: 12,
-                          color:
-                          colorScheme.onSurfaceVariant,
+                          color: colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -92,12 +81,19 @@ class ChargeHubDrawer extends StatelessWidget {
               },
             ),
 
+            if (onAddCharger != null)
+              _DrawerItem(
+                icon: Icons.add_circle_outline_rounded,
+                title: 'Add Charger',
+                onTap: () {
+                  Navigator.pop(context);
+                  onAddCharger!();
+                },
+              ),
+
             const SizedBox(height: 8),
 
-            Divider(
-              color: colorScheme.outlineVariant,
-              height: 1,
-            ),
+            Divider(color: colorScheme.outlineVariant, height: 1),
 
             const SizedBox(height: 8),
 
@@ -106,15 +102,7 @@ class ChargeHubDrawer extends StatelessWidget {
               title: 'Themes',
               onTap: () {
                 Navigator.pop(context);
-
-                Future.delayed(
-                  const Duration(milliseconds: 180),
-                  () {
-                    if (context.mounted) {
-                      ThemeSelector.show(context);
-                    }
-                  },
-                );
+                onShowThemes?.call();
               },
             ),
 
@@ -136,10 +124,7 @@ class ChargeHubDrawer extends StatelessWidget {
 
             const Spacer(),
 
-            Divider(
-              color: colorScheme.outlineVariant,
-              height: 1,
-            ),
+            Divider(color: colorScheme.outlineVariant, height: 1),
 
             _DrawerItem(
               icon: Icons.person_outline_rounded,
@@ -150,20 +135,14 @@ class ChargeHubDrawer extends StatelessWidget {
             ),
 
             Padding(
-              padding: const EdgeInsets.fromLTRB(
-                24,
-                4,
-                24,
-                20,
-              ),
+              padding: const EdgeInsets.fromLTRB(24, 4, 24, 20),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'ChargeHub',
                   style: TextStyle(
                     fontSize: 11,
-                    color:
-                    colorScheme.onSurfaceVariant,
+                    color: colorScheme.onSurfaceVariant,
                   ),
                 ),
               ),
@@ -193,25 +172,17 @@ class _DrawerItem extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 2,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
       child: Material(
         color: selected
-            ? colorScheme.primary.withValues(
-          alpha: 0.10,
-        )
+            ? colorScheme.primary.withValues(alpha: 0.10)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 14,
-              vertical: 12,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
               children: [
                 Icon(
@@ -227,9 +198,7 @@ class _DrawerItem extends StatelessWidget {
                     title,
                     style: TextStyle(
                       fontSize: 14,
-                      fontWeight: selected
-                          ? FontWeight.w700
-                          : FontWeight.w500,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                       color: selected
                           ? colorScheme.primary
                           : colorScheme.onSurface,

@@ -44,6 +44,7 @@ dependencies:
   latlong2: ^0.10.1
   flutter_dotenv: ^6.0.1
   maplibre_gl: ^0.26.2
+  supabase_flutter: ^2.18.0
 
 dev_dependencies:
   flutter_test:

@@ -10,6 +10,9 @@ class Station {
     required this.isPublic,
     required this.connectors,
     required this.source,
+    this.chargerCount,
+    this.operatorName,
+    this.notes,
   });
 
   final String id;
@@ -22,19 +25,14 @@ class Station {
   final bool? isPublic;
   final List<Connector> connectors;
   final StationSource source;
+  final int? chargerCount;
+  final String? operatorName;
+  final String? notes;
 }
 
-enum StationSource {
-  ocm,
-  osm,
-  zigwheels,
-}
+enum StationSource { ocm, osm, zigwheels, user }
 
-enum StationOperationalStatus {
-  operational,
-  unavailable,
-  unknown,
-}
+enum StationOperationalStatus { operational, unavailable, unknown }
 
 class Connector {
   const Connector({
