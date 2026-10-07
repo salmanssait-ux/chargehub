@@ -36,6 +36,7 @@ class StationCorrection {
       chargerCount: chargerCount ?? station.chargerCount,
       operatorName: station.operatorName,
       notes: station.notes,
+      sourceName: station.sourceName,
     );
   }
 

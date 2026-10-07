@@ -135,10 +135,21 @@ class StationDeduplicator {
       chargerCount: preferred.chargerCount ?? other.chargerCount,
       operatorName: preferred.operatorName ?? other.operatorName,
       notes: preferred.notes ?? other.notes,
+      sourceName: preferred.sourceName ?? other.sourceName,
     );
   }
 
   Station _preferredStation(Station first, Station second) {
+    final firstIsPublicRecord =
+        first.source == StationSource.supabase ||
+        first.source == StationSource.user;
+    final secondIsPublicRecord =
+        second.source == StationSource.supabase ||
+        second.source == StationSource.user;
+    if (firstIsPublicRecord != secondIsPublicRecord) {
+      return firstIsPublicRecord ? first : second;
+    }
+
     if (first.source == StationSource.ocm &&
         second.source == StationSource.osm) {
       return _hasBetterData(first, second) ? first : second;

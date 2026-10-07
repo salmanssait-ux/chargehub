@@ -118,7 +118,7 @@ void main() {
 Station _station({
   String id = 'zigwheels_mumbai_0003',
   String name = 'Original name',
-  StationSource source = StationSource.zigwheels,
+  StationSource source = StationSource.supabase,
 }) {
   return Station(
     id: id,

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
@@ -20,60 +21,42 @@ class OcmDataSource {
     double distanceKm = 50,
     int maxResults = 100,
   }) async {
-    final uri = Uri.https(
-      'api.openchargemap.io',
-      '/v3/poi',
-      {
-        'output': 'json',
-        'latitude': latitude.toString(),
-        'longitude': longitude.toString(),
-        'distance': distanceKm.toString(),
-        'distanceunit': 'KM',
-        'maxresults': maxResults.toString(),
-        'key': _apiKey,
-      },
-    );
+    final uri = Uri.https('api.openchargemap.io', '/v3/poi', {
+      'output': 'json',
+      'latitude': latitude.toString(),
+      'longitude': longitude.toString(),
+      'distance': distanceKm.toString(),
+      'distanceunit': 'KM',
+      'maxresults': maxResults.toString(),
+      'key': _apiKey,
+    });
 
-    print('===========================================');
-    print('OCM REQUEST');
-    print('Latitude : $latitude');
-    print('Longitude: $longitude');
-    print('Radius   : $distanceKm km');
-    print('MaxResult: $maxResults');
-    print(uri);
-    print('===========================================');
+    debugPrint('OCM request: $latitude,$longitude within $distanceKm km');
+    debugPrint('OCM max results: $maxResults');
 
-    final response = await _client.get(
-      uri,
-      headers: const {
-        'User-Agent': 'ChargeHub/1.0',
-      },
-    ).timeout(_requestTimeout);
+    final response = await _client
+        .get(uri, headers: const {'User-Agent': 'ChargeHub/1.0'})
+        .timeout(_requestTimeout);
 
-    print('Status Code: ${response.statusCode}');
+    debugPrint('OCM status code: ${response.statusCode}');
 
     if (response.statusCode != 200) {
-      throw Exception(
-        'Failed to fetch stations (${response.statusCode})',
-      );
+      throw Exception('Failed to fetch stations (${response.statusCode})');
     }
 
     final List<dynamic> json = jsonDecode(response.body);
 
-    print('Stations returned by API: ${json.length}');
+    debugPrint('Stations returned by OCM: ${json.length}');
 
     if (json.isNotEmpty) {
-      print('First station: ${json.first['AddressInfo']['Title']}');
+      debugPrint('First OCM station: ${json.first['AddressInfo']['Title']}');
     }
-
-    print('===========================================');
 
     return json
         .map(
-          (station) => OcmStationModel.fromJson(
-        station as Map<String, dynamic>,
-      ),
-    )
+          (station) =>
+              OcmStationModel.fromJson(station as Map<String, dynamic>),
+        )
         .toList();
   }
 }

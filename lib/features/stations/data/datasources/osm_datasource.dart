@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class OsmDataSource {
@@ -50,7 +51,7 @@ out center;
 
     for (final endpoint in _endpoints) {
       try {
-        print('Trying OSM endpoint: $endpoint');
+        debugPrint('Trying OSM endpoint: $endpoint');
 
         final response = await _client
             .post(
@@ -65,7 +66,7 @@ out center;
         )
             .timeout(_requestTimeout);
 
-        print(
+        debugPrint(
           'OSM response from $endpoint: ${response.statusCode}',
         );
 
@@ -94,13 +95,13 @@ out center;
             .whereType<Map<String, dynamic>>()
             .toList();
 
-        print(
+        debugPrint(
           'OSM stations received: ${stations.length}',
         );
 
         return stations;
       } catch (e) {
-        print(
+        debugPrint(
           'OSM endpoint failed: $endpoint\n$e',
         );
 

@@ -65,6 +65,7 @@ class LocalUserStationRepository implements UserStationRepository {
       chargerCount: station.chargerCount,
       operatorName: station.operatorName,
       notes: station.notes,
+      sourceName: station.sourceName,
     );
   }
 

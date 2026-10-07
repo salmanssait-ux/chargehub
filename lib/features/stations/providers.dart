@@ -3,10 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers/common_providers.dart';
 import 'data/datasources/ocm_datasource.dart';
 import 'data/datasources/osm_datasource.dart';
-import 'data/datasources/supabase_approved_station_datasource.dart';
+import 'data/datasources/supabase_stations_datasource.dart';
 import 'data/datasources/supabase_station_correction_datasource.dart';
 import 'data/datasources/supabase_station_submission_datasource.dart';
-import 'data/datasources/zigwheels_datasource.dart';
 import 'data/datasources/local_user_station_datasource.dart';
 import 'data/datasources/supabase_station_edit_suggestion_datasource.dart';
 import 'data/repositories/station_repository_impl.dart';
@@ -28,10 +27,6 @@ final osmDataSourceProvider = Provider<OsmDataSource>((ref) {
   return OsmDataSource(client);
 });
 
-final zigWheelsDataSourceProvider = Provider<ZigWheelsDataSource>((ref) {
-  return const ZigWheelsDataSource();
-});
-
 final supabaseStationSubmissionDataSourceProvider =
     Provider<SupabaseStationSubmissionDataSource>((ref) {
       return SupabaseStationSubmissionDataSource(
@@ -46,12 +41,11 @@ final stationSubmissionRepositoryProvider =
       );
     });
 
-final supabaseApprovedStationDataSourceProvider =
-    Provider<SupabaseApprovedStationDataSource>((ref) {
-      return SupabaseApprovedStationDataSource(
-        ref.watch(supabaseClientProvider),
-      );
-    });
+final supabaseStationsDataSourceProvider = Provider<SupabaseStationsDataSource>(
+  (ref) {
+    return SupabaseStationsDataSource(ref.watch(supabaseClientProvider));
+  },
+);
 
 final supabaseStationCorrectionDataSourceProvider =
     Provider<SupabaseStationCorrectionDataSource>((ref) {
@@ -78,9 +72,8 @@ final stationEditSuggestionRepositoryProvider =
 final stationRepositoryProvider = Provider<StationRepository>((ref) {
   final ocmDataSource = ref.watch(ocmDataSourceProvider);
   final osmDataSource = ref.watch(osmDataSourceProvider);
-  final zigWheelsDataSource = ref.watch(zigWheelsDataSourceProvider);
-  final approvedStationDataSource = ref.watch(
-    supabaseApprovedStationDataSourceProvider,
+  final supabaseStationsDataSource = ref.watch(
+    supabaseStationsDataSourceProvider,
   );
   final stationCorrectionDataSource = ref.watch(
     supabaseStationCorrectionDataSourceProvider,
@@ -89,8 +82,7 @@ final stationRepositoryProvider = Provider<StationRepository>((ref) {
   return StationRepositoryImpl(
     ocmDataSource,
     osmDataSource,
-    zigWheelsDataSource,
-    approvedStationDataSource,
+    supabaseStationsDataSource,
     stationCorrectionDataSource,
   );
 });

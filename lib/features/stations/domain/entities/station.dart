@@ -13,6 +13,7 @@ class Station {
     this.chargerCount,
     this.operatorName,
     this.notes,
+    this.sourceName,
   });
 
   final String id;
@@ -28,9 +29,10 @@ class Station {
   final int? chargerCount;
   final String? operatorName;
   final String? notes;
+  final String? sourceName;
 }
 
-enum StationSource { ocm, osm, zigwheels, user }
+enum StationSource { ocm, osm, supabase, user }
 
 enum StationOperationalStatus { operational, unavailable, unknown }
 

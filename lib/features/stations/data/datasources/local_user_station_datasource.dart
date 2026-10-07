@@ -35,6 +35,7 @@ class LocalUserStationDataSource {
       'isPublic': station.isPublic,
       'operatorName': station.operatorName,
       'notes': station.notes,
+      'sourceName': station.sourceName,
       'connectors': station.connectors
           .map(
             (connector) => {
@@ -78,6 +79,7 @@ class LocalUserStationDataSource {
       source: StationSource.user,
       operatorName: value['operatorName']?.toString(),
       notes: value['notes']?.toString(),
+      sourceName: value['sourceName']?.toString(),
     );
   }
 }
